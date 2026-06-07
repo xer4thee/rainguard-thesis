@@ -391,30 +391,56 @@ if (recs.length === 1) { // only disclaimer was added
       }
     },
 
-    /** Live read-back: subscribe to current_status so any logged-in device
-     *  reflects live data even without a local serial feed. */
+    /* Remote read-back state — when fresh, the dashboard renders live Supabase
+       data instead of the local simulation. */
+    remoteActive: false,
+    remoteTs: 0,
+    remoteStatus: null,
+    REMOTE_STALE_MS: 30000,
+    isRemoteFresh() { return this.remoteActive && (Date.now() - this.remoteTs) < this.REMOTE_STALE_MS; },
+
+    /** Live read-back: subscribe to sensor_readings (raw values) and current_status
+     *  (AMDA summary) so any logged-in device reflects live data without a serial feed. */
     subscribeRemote() {
       const sb = window._supabase;
       if (!sb) return;
       /* seed once so a fresh page isn't blank */
+      sb.from('sensor_readings').select('*').order('recorded_at', { ascending: false }).limit(1)
+        .then(({ data }) => { if (data && data[0]) this._applyRemoteReading(data[0]); });
       sb.from('current_status').select('*').eq('id', 1).single()
-        .then(({ data }) => { if (data) this._applyRemote(data); });
+        .then(({ data }) => { if (data) this._applyRemoteStatus(data); });
+
+      sb.channel('rg-readings')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
+            payload => this._applyRemoteReading(payload.new))
+        .subscribe();
       sb.channel('rg-status')
-        .on('postgres_changes',
-            { event: '*', schema: 'public', table: 'current_status' },
-            payload => this._applyRemote(payload.new))
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'current_status' },
+            payload => this._applyRemoteStatus(payload.new))
         .subscribe();
     },
 
-    _applyRemote(row) {
-      /* Remote data drives the UI only when THIS browser has no live serial feed. */
+    /* Populate latest sensor values from a remote reading (local serial always wins). */
+    _applyRemoteReading(row) {
       if (this.live || !row) return;
-      if (typeof row.amda_score === 'number') {
-        const el = document.getElementById('statAMDA');
-        if (el) el.textContent = row.amda_score + '% — ' + (row.amda_state || '');
-        const bar = document.getElementById('amdaProgressBar');
-        if (bar) bar.style.width = row.amda_score + '%';
-      }
+      if (typeof row.level_percent === 'number') this.latest.levelPct   = row.level_percent;
+      if (typeof row.inflow_lph    === 'number') this.latest.inflowLPH  = row.inflow_lph;
+      if (typeof row.outflow_lph   === 'number') this.latest.outflowLPH = row.outflow_lph;
+      if (typeof row.temp_c        === 'number') this.latest.tempC      = row.temp_c;
+      this.latest.ts    = Date.now();
+      this.remoteActive = true;
+      this.remoteTs     = Date.now();
+      this._history.push({ ...this.latest, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+      if (this._history.length > this.MAX_HISTORY) this._history.shift();
+      state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
+    },
+
+    /* Store remote AMDA summary + flag freshness for the "Remote" indicator. */
+    _applyRemoteStatus(row) {
+      if (this.live || !row) return;
+      this.remoteStatus = row;
+      this.remoteActive = true;
+      this.remoteTs     = Date.now();
       const upd = document.getElementById('tankLastUpdated');
       if (upd && row.updated_at) upd.textContent = '🛰 Remote — ' + new Date(row.updated_at).toLocaleTimeString();
     },
@@ -819,7 +845,7 @@ if (recs.length === 1) { // only disclaimer was added
      OVERVIEW DASHBOARD
      ────────────────────────────────────────── */
   function updateOverview() {
-    if (!SensorHub.live) SensorHub.simulate();
+    if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
     const cap    = state.settings.capacity || 5000;
     const pct    = SensorHub.latest.levelPct;
     const status = getStatus(pct);
@@ -833,7 +859,7 @@ if (recs.length === 1) { // only disclaimer was added
     $('#tankWater').style.height  = pct + '%';
     $('#tankPercent').textContent = pct + '%';
     $('#tankCapacity').textContent = fmt(cap) + ' L';
-    $('#tankLastUpdated').textContent = (SensorHub.live ? '🟢 Live — ' : '⚙ Simulated — ') + new Date().toLocaleTimeString();
+    $('#tankLastUpdated').textContent = (SensorHub.live ? '🟢 Live — ' : SensorHub.isRemoteFresh() ? '🛰 Remote — ' : '⚙ Simulated — ') + new Date().toLocaleTimeString();
 
     $('#tankInflow').textContent  = SensorHub.latest.inflowLPH.toFixed(1)  + ' L/hr';
     $('#tankOutflow').textContent = SensorHub.latest.outflowLPH.toFixed(1) + ' L/hr';
@@ -931,8 +957,8 @@ if (recs.length === 1) { // only disclaimer was added
        Does NOT touch the daily/weekly charts. */
     const iv = setInterval(() => {
       if (state.currentPage === 'overview') {
-        /* Tick simulation ONLY if no real hardware is connected */
-        if (!SensorHub.live) SensorHub.simulate();
+        /* Tick simulation ONLY if no real hardware AND no fresh remote data */
+        if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
         updateOverview();
         /* Daily chart: only append a new point when live hardware sends data */
         if (SensorHub.live && state.charts.dailyUsage) {
@@ -999,8 +1025,8 @@ if (recs.length === 1) { // only disclaimer was added
     const iv = setInterval(() => {
       if (state.currentPage !== 'tank') return;
 
-      /* Tick simulation only when no real hardware connected */
-      if (!SensorHub.live) SensorHub.simulate();
+      /* Tick simulation only when no real hardware AND no fresh remote data */
+      if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
 
       const cap    = state.settings.capacity || 5000;
       const pct    = SensorHub.latest.levelPct;
@@ -1012,7 +1038,7 @@ if (recs.length === 1) { // only disclaimer was added
 
       /* ── Simulation mode indicator ── */
       const modeEl = $('#tmSimMode');
-      if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : '⚡ Simulation Mode';
+      if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : SensorHub.isRemoteFresh() ? '🛰 Remote (Supabase)' : '⚡ Simulation Mode';
 
       $('#tmWaterLevel').textContent = fmt(state.waterLevel) + ' L';
       $('#tmCapacity').textContent   = fmt(cap) + ' L';

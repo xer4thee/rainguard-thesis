@@ -155,10 +155,27 @@ try {
     check('realtime change delivered to browser', rtScore === 77, rtScore == null ? 'no event (PAT revoked or realtime off?)' : 'score=' + rtScore);
     await ctx.close();
   }
+
+  // ── 7. Remote read-back drives the UI and is NOT overwritten by simulation ──
+  {
+    // a known remote reading exists before this (serial-less) viewer connects
+    await mq("insert into public.sensor_readings (level_percent, inflow_lph, outflow_lph, temp_c, source) values (88, 20, 10, 29, 'e2e-remote');");
+    const { ctx, page } = await loginAs(browser, 'user@rainguard.io', 'user123');
+    const reached = await page.waitForFunction(
+      () => { const el = document.querySelector('#tankPercent'); return el && el.textContent.trim() === '88%'; },
+      null, { timeout: 15000 }).then(() => true).catch(() => false);
+    check('remote reading drives tank % to 88%', reached);
+    await page.waitForTimeout(6500); // longer than the 5s overview interval (a simulation tick)
+    const still = await page.evaluate(() => document.querySelector('#tankPercent')?.textContent.trim());
+    check('remote value NOT overwritten by simulation', still === '88%', 'after 6.5s: ' + still);
+    const ind = await page.evaluate(() => document.querySelector('#tankLastUpdated')?.textContent || '');
+    check('overview shows "Remote" indicator', /Remote/i.test(ind), ind.trim());
+    await ctx.close();
+  }
 } finally {
   await browser.close();
   // cleanup test data (needs PAT)
-  const c1 = await mq("delete from public.sensor_readings where source in ('e2e-test','should-deny');");
+  const c1 = await mq("delete from public.sensor_readings where source in ('e2e-test','should-deny','e2e-remote');");
   const c2 = await mq("update public.current_status set amda_score=null, amda_state=null, recommendation=null, days_remaining=null, trend=null, time_to_overflow_hr=null, time_to_deplete_hr=null where id=1;");
   results.push(`🧹 cleanup: readings=${c1 ? 'ok' : 'skipped'} current_status=${c2 ? 'reset' : 'skipped'}${PAT ? '' : ' (no PAT)'}`);
 }
