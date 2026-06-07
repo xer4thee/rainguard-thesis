@@ -370,6 +370,24 @@ textarea {
 @keyframes cardIn { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
 
 /* ===========================
+   APP-WIDE POLISH
+   =========================== */
+/* "Last updated" captions on overview cards */
+.stat-change { font-size: .72rem; color: var(--text-muted); margin-top: .35rem; font-weight: 500; }
+
+/* Chart cards lift on hover, matching stat cards */
+.chart-card { transition: box-shadow var(--transition), transform var(--transition); }
+.chart-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+
+/* Day/Week/Month toggle hover feedback */
+.range-btn { transition: background var(--transition), color var(--transition); }
+.range-btn:not(.active):hover { color: var(--primary); }
+
+/* Smoothly animate the tank fill + AMDA bars when values change */
+.tank-water { transition: height .6s cubic-bezier(.4, 0, .2, 1); }
+.amda-progress-bar { transition: width .6s cubic-bezier(.4, 0, .2, 1); }
+
+/* ===========================
    DASHBOARD LAYOUT
    =========================== */
 .app-layout {
