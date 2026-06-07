@@ -1115,61 +1115,68 @@ if (recs.length === 1) { // only disclaimer was added
        - Real-time tank level chart (rolling 30-point history)
      Does NOT randomize historical/daily charts.
   ────────────────────────────────────────── */
-  function startTankSimulation() {
-    const iv = setInterval(() => {
-      if (state.currentPage !== 'tank') return;
+  function renderTankMonitoring() {
+    /* Tick simulation only when no real hardware AND no fresh remote data */
+    if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
 
-      /* Tick simulation only when no real hardware AND no fresh remote data */
-      if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
+    const cap    = state.settings.capacity || 20;
+    const pct    = SensorHub.latest.levelPct;
+    const inflow = SensorHub.latest.inflowLPH;
+    const outflow= SensorHub.latest.outflowLPH;
+    const net    = inflow - outflow;
+    const status = getStatus(pct);
+    const amda   = SensorHub.runAmda();
 
-      const cap    = state.settings.capacity || 20;
-      const pct    = SensorHub.latest.levelPct;
-      const inflow = SensorHub.latest.inflowLPH;
-      const outflow= SensorHub.latest.outflowLPH;
-      const net    = inflow - outflow;
-      const status = getStatus(pct);
-      const amda   = SensorHub.runAmda();
+    /* ── Mode indicator ── */
+    const modeEl = $('#tmSimMode');
+    if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : SensorHub.isRemoteFresh() ? '🛰 Remote (Supabase)' : '⚡ Simulation Mode';
 
-      /* ── Simulation mode indicator ── */
-      const modeEl = $('#tmSimMode');
-      if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : SensorHub.isRemoteFresh() ? '🛰 Remote (Supabase)' : '⚡ Simulation Mode';
+    $('#tmWaterLevel').textContent = fmt(state.waterLevel) + ' L';
+    $('#tmCapacity').textContent   = fmt(cap) + ' L';
+    $('#tmInflow').textContent     = inflow.toFixed(1) + ' L/hr';
+    $('#tmOutflow').textContent    = outflow.toFixed(1) + ' L/hr';
+    $('#tmTankWater').style.height = pct + '%';
+    $('#tmTankPercent').textContent= pct + '%';
+    $('#tmFillLevel').textContent  = pct + '%';
+    $('#tmNetFlow').textContent    = (net >= 0 ? '+' : '') + net.toFixed(1) + ' L/hr';
 
-      $('#tmWaterLevel').textContent = fmt(state.waterLevel) + ' L';
-      $('#tmCapacity').textContent   = fmt(cap) + ' L';
-      $('#tmInflow').textContent     = inflow.toFixed(1) + ' L/hr';
-      $('#tmOutflow').textContent    = outflow.toFixed(1) + ' L/hr';
-      $('#tmTankWater').style.height = pct + '%';
-      $('#tmTankPercent').textContent= pct + '%';
-      $('#tmFillLevel').textContent  = pct + '%';
-      $('#tmNetFlow').textContent    = (net >= 0 ? '+' : '') + net.toFixed(1) + ' L/hr';
+    const timeToFull = net > 0 ? ((cap - state.waterLevel) / Math.max(0.1, net)).toFixed(1) : '∞';
+    $('#tmTimeToFull').textContent = net > 0 ? '~' + timeToFull + ' hrs' : 'N/A';
 
-      const timeToFull = net > 0 ? ((cap - state.waterLevel) / Math.max(0.1, net)).toFixed(1) : '∞';
-      $('#tmTimeToFull').textContent = net > 0 ? '~' + timeToFull + ' hrs' : 'N/A';
-
-      const si = $('#tmStatusIndicator');
+    const si = $('#tmStatusIndicator');
+    if (si) {
       si.className = 'status-badge ' + status.cls;
       si.innerHTML = '<span class="dot"></span>' + sanitizeText(status.label);
+    }
 
-      $('#tmOverflowWarning').classList.toggle('hidden', pct < (state.settings.overflowThreshold || 95));
+    const ow = $('#tmOverflowWarning');
+    if (ow) ow.classList.toggle('hidden', pct < (state.settings.overflowThreshold || 95));
 
-      /* Real AMDA output */
-      $('#tmAmdaBar').style.width    = amda.score + '%';
-      $('#tmAmdaPercent').textContent = amda.score + '%';
-      const tmText = $('#tmAmdaText');
-      if (tmText) tmText.textContent = amda.state.icon + ' ' + amda.state.label
-        + ' — ' + (amda.recommendations[0]?.text || '') + ' Days remaining: ~' + amda.daysRemaining + 'd.';
+    /* Real AMDA output */
+    $('#tmAmdaBar').style.width    = amda.score + '%';
+    $('#tmAmdaPercent').textContent = amda.score + '%';
+    const tmText = $('#tmAmdaText');
+    if (tmText) tmText.textContent = amda.state.icon + ' ' + amda.state.label
+      + ' — ' + (amda.recommendations[0]?.text || '') + ' Days remaining: ~' + amda.daysRemaining + 'd.';
 
-      /* Alert on state change (not just threshold) */
-      checkAndFireAlert(amda, status);
+    /* Alert on state change (not just threshold) */
+    checkAndFireAlert(amda, status);
 
-      /* Real-time rolling chart — only this chart updates every 3s */
-      if (state.charts.tankHistory) {
-        const d = state.charts.tankHistory.data;
-        d.labels.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-        d.datasets[0].data.push(state.waterLevel);
-        if (d.labels.length > 30) { d.labels.shift(); d.datasets[0].data.shift(); }
-        state.charts.tankHistory.update('none');
-      }
+    /* Real-time rolling chart */
+    if (state.charts.tankHistory) {
+      const d = state.charts.tankHistory.data;
+      d.labels.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+      d.datasets[0].data.push(state.waterLevel);
+      if (d.labels.length > 30) { d.labels.shift(); d.datasets[0].data.shift(); }
+      state.charts.tankHistory.update('none');
+    }
+  }
+
+  function startTankSimulation() {
+    renderTankMonitoring(); /* immediate first paint — no ~3s blank */
+    const iv = setInterval(() => {
+      if (state.currentPage !== 'tank') return;
+      renderTankMonitoring();
     }, 3000);
     state.intervals.push(iv);
   }
@@ -1365,6 +1372,31 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      ANALYTICS
      ────────────────────────────────────────── */
+  /* Fill the Analytics "Total Collected" + "Estimated Water Savings" cards from real data. */
+  async function loadAnalyticsStats() {
+    const sb = window._supabase;
+    if (!sb) return;
+    try {
+      const since = new Date(Date.now() - 30 * 24 * 3600e3).toISOString();
+      const { data: rows } = await sb.from('sensor_readings')
+        .select('level_percent, outflow_lph, recorded_at')
+        .gte('recorded_at', since).order('recorded_at', { ascending: true }).limit(5000);
+      if (!Array.isArray(rows) || !rows.length) return;
+      const cap = state.settings.capacity || 20;
+      let collected = 0, used = 0, prevLvl = null, prevT = null;
+      for (const r of rows) {
+        const t = new Date(r.recorded_at).getTime();
+        if (prevLvl !== null && r.level_percent > prevLvl) collected += ((r.level_percent - prevLvl) / 100) * cap;
+        if (prevT !== null) used += (r.outflow_lph || 0) * Math.min((t - prevT) / 3600e3, 3);
+        prevLvl = r.level_percent; prevT = t;
+      }
+      const totalEl = document.getElementById('analyticsTotal');
+      if (totalEl) totalEl.textContent = fmt(Math.round(collected)) + ' L';
+      const saveEl = document.getElementById('analyticsSavings');
+      if (saveEl) saveEl.textContent = fmt(Math.round(used)) + ' L';
+    } catch (_) { /* leave placeholders */ }
+  }
+
   function initAnalyticsCharts() {
     // Daily line
     const c1 = $('#chartAnalyticsDaily');
@@ -1496,6 +1528,8 @@ if (recs.length === 1) { // only disclaimer was added
       URL.revokeObjectURL(url);
       showToast('CSV exported (' + (rows.length - 1) + ' rows)!');
     });
+
+    loadAnalyticsStats();
   }
 
   /* ──────────────────────────────────────────
@@ -1822,10 +1856,16 @@ if (recs.length === 1) { // only disclaimer was added
     if (!sb) return;
     try {
       const { data: cs } = await sb.from('current_status').select('amda_score').eq('id', 1).single();
-      if (cs && typeof cs.amda_score === 'number') {
-        const el = document.getElementById('lguAmdaConfidence');
-        if (el) el.textContent = cs.amda_score + '%';
-      }
+      /* Use the live AMDA score if present, else compute from the latest reading. */
+      let score = (cs && typeof cs.amda_score === 'number') ? cs.amda_score : SensorHub.runAmda().score;
+      if (!Number.isFinite(score)) score = 0;
+      const confEl = document.getElementById('lguAmdaConfidence');
+      if (confEl) confEl.textContent = score + '%';
+      const barEl = document.getElementById('lguRegionalBar');
+      if (barEl) barEl.style.width = score + '%';
+      const pctEl = document.getElementById('lguRegionalPct');
+      if (pctEl) pctEl.textContent = score + '%';
+
       const since = new Date(Date.now() - 30 * 24 * 3600e3).toISOString();
       const { data: rows } = await sb.from('sensor_readings')
         .select('level_percent, source, recorded_at')
@@ -1833,9 +1873,9 @@ if (recs.length === 1) { // only disclaimer was added
         .order('recorded_at', { ascending: true })
         .limit(5000);
       if (Array.isArray(rows)) {
-        const sources = new Set(rows.map(r => r.source || 'esp32'));
+        const sys = Math.max(1, new Set(rows.map(r => r.source || 'esp32')).size);
         const sysEl = document.getElementById('lguTotalSystems');
-        if (sysEl) sysEl.textContent = String(Math.max(1, sources.size));
+        if (sysEl) sysEl.textContent = String(sys);
         /* "Water collected" estimate: sum of positive level rises × tank capacity */
         const cap = state.settings.capacity || 20;
         let collected = 0, prev = null;
@@ -1845,6 +1885,8 @@ if (recs.length === 1) { // only disclaimer was added
         }
         const waterEl = document.getElementById('lguTotalWater');
         if (waterEl) waterEl.textContent = fmt(Math.round(collected)) + ' L';
+        const noteEl = document.getElementById('lguRegionalNote');
+        if (noteEl) noteEl.textContent = sys + ' system' + (sys === 1 ? '' : 's') + ' reporting · regional confidence ' + score + '%.';
       }
     } catch (_) { /* leave the placeholder values */ }
   }
