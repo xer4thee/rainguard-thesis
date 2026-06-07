@@ -151,7 +151,7 @@
             <section id="page-overview" class="page-section hidden">
                 <div class="page-header">
                     <h2>Dashboard Overview</h2>
-                    <p>Monitor your rainwater tank in real time</p>
+                    <p>Periodic snapshot — each card shows when it was last updated <span id="overviewLastUpdated" style="color:var(--text-muted);"></span></p>
                 </div>
 
                 <div class="stats-grid">
@@ -165,6 +165,7 @@
                         <div class="stat-info">
                             <h3 id="statWaterLevel">—</h3>
                             <p>Current Water Level</p>
+                            <div class="stat-change" id="statWaterUpdated">—</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -191,6 +192,7 @@
                         <div class="stat-info">
                             <h3 id="statAlerts">—</h3>
                             <p>Active Alerts</p>
+                            <div class="stat-change" id="statAlertsUpdated">—</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -202,7 +204,7 @@
                         <div class="stat-info">
                             <h3 id="statAMDA">—</h3>
                             <p>AMDA Prediction</p>
-                            <div class="stat-change up">System healthy</div>
+                            <div class="stat-change" id="statAmdaUpdated">—</div>
                         </div>
                     </div>
                 </div>
@@ -255,8 +257,12 @@
 
                     <div class="chart-card">
                         <div class="card-header">
-                            <div class="card-title">Daily Water Usage</div>
-                            <div class="card-subtitle">Last 7 days</div>
+                            <div class="card-title">Water Usage</div>
+                            <div class="range-toggle" id="overviewRange">
+                                <button type="button" data-range="day" class="range-btn active">Day</button>
+                                <button type="button" data-range="week" class="range-btn">Week</button>
+                                <button type="button" data-range="month" class="range-btn">Month</button>
+                            </div>
                         </div>
                         <canvas id="chartDailyUsage"></canvas>
                     </div>
@@ -328,8 +334,8 @@
             <!-- ────── TANK MONITORING ────── -->
             <section id="page-tank" class="page-section hidden">
                 <div class="page-header">
-                    <h2>Tank Monitoring</h2>
-                    <p>Real-time water level and flow data</p>
+                    <h2>Tank Monitoring <span class="live-badge" id="tmLiveBadge"><span class="live-dot"></span>LIVE</span></h2>
+                    <p>Real-time water level and flow data — updates continuously</p>
                 </div>
 
                 <div class="stats-grid">

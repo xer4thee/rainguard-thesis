@@ -862,6 +862,21 @@ textarea {
 .sc-tab-pane { display: block; }
 .sc-tab-pane.hidden { display: none; }
 
+/* Live badge (Tank Monitoring) */
+.live-badge {
+  display: inline-flex; align-items: center; gap: .35rem;
+  font-size: .6rem; font-weight: 700; letter-spacing: .05em;
+  color: #fff; background: #F44336; padding: .15rem .5rem;
+  border-radius: 999px; vertical-align: middle; margin-left: .5rem;
+}
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: rg-pulse 1.2s ease-in-out infinite; }
+@keyframes rg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+
+/* Day / Week / Month range toggle (Overview) */
+.range-toggle { display: inline-flex; gap: .25rem; background: rgba(0,0,0,.05); padding: .2rem; border-radius: 8px; }
+.range-btn { border: none; background: transparent; padding: .3rem .7rem; font-size: .8rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); }
+.range-btn.active { background: var(--primary); color: #fff; }
+
 .status-badge.overflow {
   background: var(--status-overflow-bg);
   color: var(--status-overflow);

@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://zhfehohjkafrcwwqexdy.supabase.co wss://zhfehohjkafrcwwqexdy.supabase.co;">
+  <title>RainGuard — Log In</title>
+  <meta name="description" content="Log in to your RainGuard rainwater monitoring dashboard.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+</head>
+<body>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z"/></svg>
+        </div>
+        <h1>RainGuard</h1>
+        <p>Rainwater Monitoring System</p>
+      </div>
+
+      <form id="loginForm" autocomplete="off">
+        <div id="loginError" class="login-error"></div>
+
+        <div class="form-group">
+          <label for="username">Email</label>
+          <input type="email" id="username" placeholder="Enter your email" required maxlength="64" autocomplete="email">
+        </div>
+
+        <div class="form-group">
+          <label for="password">Password</label>
+          <input type="password" id="password" placeholder="Enter your password" required maxlength="64" autocomplete="current-password">
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="loginBtn">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+            <polyline points="10 17 15 12 10 7"/>
+            <line x1="15" y1="12" x2="3" y2="12"/>
+          </svg>
+          Log In
+        </button>
+
+        <a href="#" class="forgot-link"
+          onclick="alert('Password reset is not available in this demo.');return false;">Forgot Password?</a>
+      </form>
+
+      <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border-light);text-align:center;">
+        <p style="font-size:.85rem;color:var(--text-muted);">Don't have an account?
+          <a href="register.html" style="color:var(--primary);font-weight:600;">Create one</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const supabase = createClient(
+      'https://zhfehohjkafrcwwqexdy.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU'
+    );
+    window._supabase = supabase;
+
+    /* ─────────────────────────────────────────
+       RATE LIMITER  (session-scoped) — Max 5 attempts per 60 seconds.
+    ───────────────────────────────────────── */
+    const RateLimiter = {
+      MAX: 5,
+      WIN: 60000,
+      _aKey: 'rg_login_attempts',
+      _lKey: 'rg_login_lockout',
+      _get()  { try { return JSON.parse(sessionStorage.getItem(this._aKey)) || []; } catch { return []; } },
+      locked() {
+        const u = parseInt(sessionStorage.getItem(this._lKey) || '0');
+        return Date.now() < u ? u : false;
+      },
+      record() {
+        const now = Date.now();
+        let arr = this._get().filter(t => now - t < this.WIN);
+        arr.push(now);
+        sessionStorage.setItem(this._aKey, JSON.stringify(arr));
+        if (arr.length >= this.MAX) sessionStorage.setItem(this._lKey, String(now + this.WIN));
+        return arr.length;
+      },
+      left() {
+        const now = Date.now();
+        return Math.max(0, this.MAX - this._get().filter(t => now - t < this.WIN).length);
+      }
+    };
+
+    const errEl = document.getElementById('loginError');
+    const btn   = document.getElementById('loginBtn');
+    let timer   = null;
+
+    function startCountdown(until) {
+      if (timer) clearInterval(timer);
+      btn.disabled = true;
+      timer = setInterval(() => {
+        const s = Math.ceil((until - Date.now()) / 1000);
+        if (s <= 0) {
+          clearInterval(timer); timer = null;
+          btn.disabled = false; errEl.textContent = '';
+        } else {
+          errEl.textContent = 'Too many failed attempts. Try again in ' + s + 's.';
+        }
+      }, 500);
+    }
+
+    /* Redirect if already logged in */
+    const { data: { session: existingSession } } = await supabase.auth.getSession();
+    if (existingSession) window.location.href = 'dashboard.html';
+
+    const existingLock = RateLimiter.locked();
+    if (existingLock) startCountdown(existingLock);
+
+    document.getElementById('loginForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      const lockUntil = RateLimiter.locked();
+      if (lockUntil) { startCountdown(lockUntil); return; }
+
+      const email = document.getElementById('username').value.trim().toLowerCase().slice(0, 64);
+      const pass  = document.getElementById('password').value.slice(0, 64);
+
+      if (!email || !pass) {
+        errEl.textContent = 'Please enter both email and password.'; return;
+      }
+
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (!error && data.session) {
+        window.location.href = 'dashboard.html';
+      } else {
+        RateLimiter.record();
+        document.getElementById('password').value = '';
+        const lock = RateLimiter.locked();
+        if (lock) {
+          startCountdown(lock);
+        } else {
+          const left = RateLimiter.left();
+          errEl.textContent = 'Invalid email or password. ' + left + ' attempt' + (left !== 1 ? 's' : '') + ' remaining.';
+        }
+      }
+    });
+  </script>
+</body>
+</html>

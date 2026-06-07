@@ -2,6 +2,9 @@
 // Run:  PORT=8123 SUPABASE_PAT=sbp_... node tests/e2e.mjs   (after `npm run serve` in another shell,
 // or the runner script starts the server for you).
 import { chromium } from 'playwright';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, join, normalize, sep } from 'node:path';
 
 const PORT = process.env.PORT || 8123;
 const ORIGIN = `http://localhost:${PORT}`;
@@ -37,7 +40,7 @@ async function loginAs(browser, email, password) {
   const errors = [];
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+  await page.goto(`${ORIGIN}/login.html`, { waitUntil: 'networkidle' });
   await page.fill('#username', email);
   await page.fill('#password', password);
   await Promise.all([
@@ -48,20 +51,51 @@ async function loginAs(browser, email, password) {
   return { ctx, page, errors };
 }
 
+// Self-hosted static server — one-command suite, no separate server process needed.
+const _ROOT = process.cwd();
+const _TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.png': 'image/png' };
+const _server = createServer(async (req, res) => {
+  try {
+    let p = decodeURIComponent((req.url || '/').split('?')[0]);
+    if (p === '/') p = '/index.html';
+    const file = normalize(join(_ROOT, p));
+    if (!file.startsWith(_ROOT + sep) && file !== _ROOT) { res.writeHead(403); res.end('forbidden'); return; }
+    const data = await readFile(file);
+    res.writeHead(200, { 'Content-Type': _TYPES[extname(file)] || 'application/octet-stream' });
+    res.end(data);
+  } catch { res.writeHead(404); res.end('not found'); }
+});
+await new Promise((r) => _server.listen(PORT, r));
+console.log('static server on ' + ORIGIN);
+
 const browser = await launch();
 console.log('browser:', browser.browserType().name(), browser.version());
 try {
-  // ── 1. Bad password is rejected ──
+  // ── 0. Landing page: Log In + Register links; login form lives on login.html ──
   {
     const ctx = await browser.newContext();
     const page = await ctx.newPage();
     await page.goto(`${ORIGIN}/index.html`, { waitUntil: 'networkidle' });
+    const hasLogin = await page.locator('a[href="login.html"]').count();
+    const hasReg = await page.locator('a[href="register.html"]').count();
+    check('landing has Log In + Register links', hasLogin > 0 && hasReg > 0, `login=${hasLogin} reg=${hasReg}`);
+    check('landing has NO login form (moved to login.html)', (await page.locator('#loginForm').count()) === 0);
+    await page.goto(`${ORIGIN}/register.html`, { waitUntil: 'networkidle' });
+    check('register page has signup form', (await page.locator('#registerForm').count()) > 0);
+    await ctx.close();
+  }
+
+  // ── 1. Bad password is rejected ──
+  {
+    const ctx = await browser.newContext();
+    const page = await ctx.newPage();
+    await page.goto(`${ORIGIN}/login.html`, { waitUntil: 'networkidle' });
     await page.fill('#username', 'admin@rainguard.io');
     await page.fill('#password', 'WRONGpass');
     await page.click('#loginBtn');
     await page.waitForTimeout(3000);
     const err = (await page.textContent('#loginError').catch(() => '')) || '';
-    check('bad password rejected & stays on login', page.url().includes('index.html') && /invalid/i.test(err), `err="${err.trim()}"`);
+    check('bad password rejected & stays on login', page.url().includes('login.html') && /invalid/i.test(err), `err="${err.trim()}"`);
     await ctx.close();
   }
 
@@ -118,6 +152,21 @@ try {
       return error ? 'err:' + error.message : 'rows:' + (data ? data.length : 0);
     });
     check('user can READ current_status', canRead.startsWith('rows:'), canRead);
+
+    // last-updated indicators (§2.1) + Day/Week/Month toggle (§2.3) + LIVE badge (§2.2)
+    const lastUpd = await page.waitForFunction(() => {
+      const el = document.querySelector('#statWaterUpdated'); return el && /Updated/.test(el.textContent);
+    }, null, { timeout: 10000 }).then(() => true).catch(() => false);
+    check('overview shows per-card "last updated"', lastUpd);
+    check('overview has Day/Week/Month toggle', (await page.locator('#overviewRange .range-btn').count()) === 3);
+    await page.click('#overviewRange .range-btn[data-range="week"]').catch(() => {});
+    await page.waitForTimeout(700);
+    const weekActive = await page.evaluate(() => {
+      const b = document.querySelector('#overviewRange .range-btn[data-range="week"]');
+      return !!b && b.classList.contains('active');
+    });
+    check('range toggle switches to Week', weekActive);
+    check('tank monitoring has LIVE badge', (await page.locator('#tmLiveBadge').count()) > 0);
     await ctx.close();
   }
 
@@ -174,6 +223,7 @@ try {
   }
 } finally {
   await browser.close();
+  _server.close();
   // cleanup test data (needs PAT)
   const c1 = await mq("delete from public.sensor_readings where source in ('e2e-test','should-deny','e2e-remote');");
   const c2 = await mq("update public.current_status set amda_score=null, amda_state=null, recommendation=null, days_remaining=null, trend=null, time_to_overflow_hr=null, time_to_deplete_hr=null where id=1;");

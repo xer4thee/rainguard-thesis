@@ -647,7 +647,7 @@ if (recs.length === 1) { // only disclaimer was added
   async function checkAuth() {
     const sb = window._supabase;
     const { data: { session } } = await sb.auth.getSession();
-    if (!session) { window.location.href = 'index.html'; return false; }
+    if (!session) { window.location.href = 'login.html'; return false; }
     const { data: profile } = await sb
       .from('profiles').select('username, role').eq('id', session.user.id).single();
     state.role = profile?.role || 'user';
@@ -897,6 +897,14 @@ if (recs.length === 1) { // only disclaimer was added
     const analyticsAmdaEl = $('#analyticsAmdaPct');
     if (analyticsAmdaEl) analyticsAmdaEl.textContent = amda.score + '%';
 
+    /* Per-card "last updated" timestamps (Overview = snapshot view) */
+    const _upd = 'Updated ' + new Date(SensorHub.latest.ts).toLocaleTimeString();
+    ['statWaterUpdated', 'statAlertsUpdated', 'statAmdaUpdated'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.textContent = _upd;
+    });
+    const ovLast = document.getElementById('overviewLastUpdated');
+    if (ovLast) ovLast.textContent = '(as of ' + new Date(SensorHub.latest.ts).toLocaleTimeString() + ')';
+
     /* State-change alert — fires from Overview page too */
     checkAndFireAlert(amda, getStatus(pct));
 
@@ -910,6 +918,53 @@ if (recs.length === 1) { // only disclaimer was added
     if (pct <= (s.criticalThreshold || 15)) return { label: 'Critical', cls: 'critical' };
     if (pct <= (s.lowThreshold || 30)) return { label: 'Low', cls: 'low' };
     return { label: 'Normal', cls: 'normal' };
+  }
+
+  /* Load the Overview "Water Usage" chart for a day/week/month range from Supabase history. */
+  async function loadOverviewRange(range) {
+    const chart = state.charts.dailyUsage;
+    if (!chart) return;
+    const sb = window._supabase;
+    const now = Date.now();
+    let startMs, bucketMs, fmtLabel;
+    if (range === 'week') {
+      startMs = now - 7 * 24 * 3600e3; bucketMs = 24 * 3600e3;
+      fmtLabel = d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+    } else if (range === 'month') {
+      startMs = now - 30 * 24 * 3600e3; bucketMs = 24 * 3600e3;
+      fmtLabel = d => (d.getMonth() + 1) + '/' + d.getDate();
+    } else { /* day */
+      startMs = now - 24 * 3600e3; bucketMs = 3600e3;
+      fmtLabel = d => String(d.getHours()).padStart(2, '0') + ':00';
+    }
+    let rows = [];
+    if (sb) {
+      try {
+        const { data } = await sb.from('sensor_readings')
+          .select('level_percent, recorded_at')
+          .gte('recorded_at', new Date(startMs).toISOString())
+          .order('recorded_at', { ascending: true })
+          .limit(2000);
+        rows = data || [];
+      } catch (_) { rows = []; }
+    }
+    const buckets = new Map();
+    for (const r of rows) {
+      const key = Math.floor((new Date(r.recorded_at).getTime() - startMs) / bucketMs);
+      const b = buckets.get(key) || { sum: 0, n: 0 };
+      b.sum += r.level_percent || 0; b.n++; buckets.set(key, b);
+    }
+    const count = Math.max(1, Math.ceil((now - startMs) / bucketMs));
+    const labels = [], dataArr = [];
+    for (let i = 0; i < count; i++) {
+      labels.push(fmtLabel(new Date(startMs + i * bucketMs)));
+      const b = buckets.get(i);
+      dataArr.push(b ? Math.round(b.sum / b.n) : null);
+    }
+    chart.data.labels = labels;
+    chart.data.datasets[0].data = dataArr;
+    chart.data.datasets[0].label = 'Avg Tank Level % — ' + range;
+    chart.update();
   }
 
   function initOverviewCharts() {
@@ -934,8 +989,19 @@ if (recs.length === 1) { // only disclaimer was added
             pointBackgroundColor: '#1976D2', pointRadius: 4,
           }]
         },
-        options: chartOptions('Water Usage (Liters)')
+        options: chartOptions('Avg Tank Level (%)')
       });
+
+      /* Day / Week / Month range toggle → load real history from Supabase */
+      const rangeEl = $('#overviewRange');
+      if (rangeEl) {
+        rangeEl.querySelectorAll('.range-btn').forEach(b => b.addEventListener('click', () => {
+          rangeEl.querySelectorAll('.range-btn').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          loadOverviewRange(b.dataset.range);
+        }));
+      }
+      loadOverviewRange('day');
     }
 
     /* ── Weekly Consumption Chart ──
@@ -1096,10 +1162,18 @@ if (recs.length === 1) { // only disclaimer was added
   let _lastAlertedState = null;  // tracks previous AMDA state label
   let _lastAlertedStatus = null; // tracks previous tank status label
   let _alertCooldownMap = {};
+  let _lastThresholdEval = 0; // throttles threshold/alert evaluation (see checkAndFireAlert)
 
   function checkAndFireAlert(amda, status) {
   const cfg = loadFromStorage('amdaConfig', { autoAlert: true });
   if (!cfg.autoAlert) return;
+
+  /* Throttle: evaluate thresholds at most once per interval (default 1 min;
+     configurable via amdaConfig.thresholdIntervalMin) — NOT every render tick. */
+  const _nowEval = Date.now();
+  const _intervalMs = (cfg.thresholdIntervalMin || 1) * 60000;
+  if (_nowEval - _lastThresholdEval < _intervalMs) return;
+  _lastThresholdEval = _nowEval;
 
     const badStates   = ['Critical', 'Emergency'];
   const badStatuses = ['Critical', 'Overflow'];
