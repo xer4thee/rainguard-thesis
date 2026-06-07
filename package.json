@@ -1,0 +1,13 @@
+{
+  "name": "rainguard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "RainGuard rainwater monitoring system",
+  "scripts": {
+    "serve": "node tests/serve.mjs",
+    "test:e2e": "node tests/e2e.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.48.0"
+  }
+}
