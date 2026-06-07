@@ -70,11 +70,23 @@
 
 #include <Arduino.h>
 
+/* DS18B20 water-temperature sensor.
+   Set ENABLE_DS18B20 to 0 if you don't have the probe or its libraries
+   installed — the sketch then falls back to a fixed placeholder temp and
+   needs no extra libraries. Requires "OneWire" + "DallasTemperature"
+   (install via Arduino Library Manager) when set to 1. */
+#define ENABLE_DS18B20   1
+#if ENABLE_DS18B20
+  #include <OneWire.h>
+  #include <DallasTemperature.h>
+#endif
+
 /* ── Pin Definitions ── */
 #define TRIG_PIN      5     // HC-SR04 trigger
 #define ECHO_PIN      18    // HC-SR04 echo (via voltage divider)
 #define INFLOW_PIN    14    // YF-S201 inflow signal
 #define OUTFLOW_PIN   27    // YF-S201 outflow signal (optional)
+#define TEMP_PIN       4    // DS18B20 data line (+ 4.7kΩ pull-up to 3.3V)
 
 /* ── Tank Configuration ── */
 #define TANK_HEIGHT_CM      33   // Physical tank height in cm
@@ -85,11 +97,34 @@
 // Adjust PULSES_PER_LITER for your specific sensor after calibration
 #define PULSES_PER_LITER   450.0  // pulses per litre (7.5 p/s * 60s = 450 p/min per L/min)
 
+/* ── Diagnostics & Level Filtering ── */
+// DIAG_MODE: when 1, every cycle also prints a "# RAW ..." comment line with the
+// raw pulse counts and distance. These lines start with '#' so the web app's
+// serial parser ignores them — but you can SEE them in the in-app Serial Monitor.
+// Use it to verify flow-meter wiring: run water (or spin the rotor) through each
+// meter and watch inflowPulses / outflowPulses climb. If they stay 0, the problem
+// is wiring/power/sensor — not this code. Set to 0 for production.
+#define DIAG_MODE              1
+// The HC-SR04 is read DISTANCE_SAMPLES times per cycle; timeouts and echoes outside
+// [DIST_MIN_CM, DIST_MAX_CM] are discarded and the median of the rest is used.
+// This kills the spurious "0%" glitch readings caused by single bad echoes.
+#define DISTANCE_SAMPLES       5
+#define DIST_MIN_CM          2.0    // reject echoes closer than this (noise / sensor face)
+#define DIST_MAX_CM         40.0    // reject echoes beyond empty-tank distance + margin
+
 /* ── Globals ── */
 volatile unsigned long inflowPulses  = 0;
 volatile unsigned long outflowPulses = 0;
 unsigned long lastReport = 0;
 const unsigned long REPORT_INTERVAL_MS = 2000;
+
+/* ── DS18B20 temperature ── */
+const float TEMP_FALLBACK_C = 28.0;   // used when no DS18B20 is detected
+#if ENABLE_DS18B20
+OneWire oneWire(TEMP_PIN);
+DallasTemperature tempSensor(&oneWire);
+bool ds18b20Present = false;          // set true in setup() if a probe is found
+#endif
 
 /* ── Interrupt Service Routines ── */
 void IRAM_ATTR countInflow()  { inflowPulses++;  }
@@ -110,6 +145,34 @@ float measureDistanceCM() {
   long duration = pulseIn(ECHO_PIN, HIGH, 30000UL); // 30ms timeout
   if (duration == 0) return -1.0;
   return (duration * 0.0343) / 2.0; // speed of sound = 343 m/s = 0.0343 cm/µs
+}
+
+/* ─────────────────────────────────────────
+   measureDistanceMedian()
+   Takes DISTANCE_SAMPLES readings, discards timeouts and
+   out-of-range echoes, and returns the median of what remains.
+   Returns -1 if no valid sample was obtained (true sensor error).
+   The median rejects the occasional bad echo that otherwise
+   showed up as a spurious 0% reading in the stored data.
+───────────────────────────────────────── */
+float measureDistanceMedian() {
+  float valid[DISTANCE_SAMPLES];
+  int count = 0;
+  for (int i = 0; i < DISTANCE_SAMPLES; i++) {
+    float d = measureDistanceCM();
+    if (d >= DIST_MIN_CM && d <= DIST_MAX_CM) valid[count++] = d;
+    delay(15); // let echoes dissipate between pings
+  }
+  if (count == 0) return -1.0;
+
+  /* insertion sort the valid samples (small array) */
+  for (int i = 1; i < count; i++) {
+    float key = valid[i];
+    int j = i - 1;
+    while (j >= 0 && valid[j] > key) { valid[j + 1] = valid[j]; j--; }
+    valid[j + 1] = key;
+  }
+  return valid[count / 2];
 }
 
 /* ─────────────────────────────────────────
@@ -172,8 +235,25 @@ void setup() {
   attachInterrupt(digitalPinToInterrupt(INFLOW_PIN),  countInflow,  FALLING);
   attachInterrupt(digitalPinToInterrupt(OUTFLOW_PIN), countOutflow, FALLING);
 
+  /* DS18B20 temperature probe */
+#if ENABLE_DS18B20
+  tempSensor.begin();
+  ds18b20Present = (tempSensor.getDeviceCount() > 0);
+  if (ds18b20Present) {
+    tempSensor.setResolution(11);              // 11-bit ≈ 0.125°C, ~375ms conversion
+    tempSensor.setWaitForConversion(false);    // non-blocking: read prev value each cycle
+    tempSensor.requestTemperatures();          // kick off the first conversion
+    Serial.println("# DS18B20 detected on GPIO 4.");
+  } else {
+    Serial.println("# DS18B20 NOT found — using fallback temp. Check DATA->GPIO4 + 4.7k pull-up to 3.3V.");
+  }
+#endif
+
   Serial.println("# RainGuard Sensor Node Ready");
   Serial.println("# Format: {\"level\":%.1f,\"inflow\":%.1f,\"outflow\":%.1f,\"temp\":%.1f,\"ts\":%lu}");
+#if DIAG_MODE
+  Serial.println("# DIAG_MODE ON — '# RAW ...' lines show raw pulse counts. Run water through each meter and watch the counts. Set DIAG_MODE 0 for production.");
+#endif
   lastReport = millis();
 }
 
@@ -193,16 +273,31 @@ void loop() {
 
     float intervalSec = elapsed / 1000.0;
 
-    /* ── 2. Water level via ultrasonic ── */
-    float distCM   = measureDistanceCM();
+    /* ── 2. Water level via ultrasonic (median-filtered, glitch-rejecting) ── */
+    float distCM   = measureDistanceMedian();
     float levelPct = distanceToLevelPct(distCM);
 
     /* ── 3. Flow rates ── */
     float inflowLPH  = pulsesToLitresPerHr(snapInflow,  intervalSec);
     float outflowLPH = pulsesToLitresPerHr(snapOutflow, intervalSec);
 
-    /* ── 4. Temperature (placeholder — replace with DS18B20 read) ── */
-    float tempC = 28.0; // Replace: sensors.requestTemperatures(); sensors.getTempCByIndex(0);
+    /* ── 4. Temperature via DS18B20 (non-blocking: read prior conversion, start next) ── */
+    float tempC = TEMP_FALLBACK_C;
+#if ENABLE_DS18B20
+    if (ds18b20Present) {
+      float t = tempSensor.getTempCByIndex(0);   // result of the conversion started last cycle
+      if (t != DEVICE_DISCONNECTED_C && t > -55.0 && t < 125.0) tempC = t;
+      tempSensor.requestTemperatures();          // kick off next conversion (ready well within 2s)
+    }
+#endif
+
+    /* ── Diagnostics — raw counts so you can verify flow-meter wiring ── */
+#if DIAG_MODE
+    Serial.print("# RAW  inflowPulses="); Serial.print(snapInflow);
+    Serial.print("  outflowPulses=");     Serial.print(snapOutflow);
+    Serial.print("  distCM=");            Serial.print(distCM, 1);
+    Serial.print("  levelPct=");          Serial.println(levelPct, 1);
+#endif
 
     /* ── 5. Emit JSON packet ── */
     if (levelPct >= 0) {
