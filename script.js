@@ -38,16 +38,8 @@ const RainGuard = (function () {
     { id: 'SNS-005', type: 'Flow Rate',   status: 'maintenance', lastData: '2026-02-14 09:00', calibration: '2025-11-15', assignedTo: 'Tank C' },
   ];
 
-  /* Load persisted alerts from localStorage (merges with seed data) */
-  const _SEED_ALERTS = [
-    { type: 'warning',  title: 'Low Water Level',   message: 'Tank B water level dropped below 30%.', time: '10 min ago' },
-    { type: 'critical', title: 'Critical Level',     message: 'Tank C approaching critical level at 16%.', time: '25 min ago' },
-    { type: 'info',     title: 'Sensor Reconnected', message: 'SNS-003 back online after maintenance.', time: '1 hr ago' },
-    { type: 'danger',   title: 'Overflow Alert',     message: 'Tank A reached 96% capacity during heavy rain.', time: '2 hrs ago' },
-    { type: 'warning',  title: 'High Outflow',       message: 'Outflow rate exceeded 80 L/hr on Tank A.', time: '3 hrs ago' },
-    { type: 'info',     title: 'AMDA Engine Active',  message: 'AMDA v2 running — 5-parameter weighted scoring with predictive analytics.', time: '5 hrs ago' },
-  ];
-  const DEFAULT_ALERTS = loadFromStorageEarly('alerts', _SEED_ALERTS);
+  /* Live alerts — loaded from Supabase at runtime (see loadAlerts). */
+  const DEFAULT_ALERTS = [];
 
   /* Early-access storage helper (before $ helpers are defined) */
   function loadFromStorageEarly(key, fallback) {
@@ -818,7 +810,7 @@ if (recs.length === 1) { // only disclaimer was added
         if (!pagesInitialized.tank) { initTankCharts(); startTankSimulation(); pagesInitialized.tank = true; }
         break;
       case 'alerts':
-        renderAlerts();
+        loadAlerts();
         initAlertPrefs();
         break;
       case 'analytics':
@@ -1233,7 +1225,7 @@ if (recs.length === 1) { // only disclaimer was added
     pushAmdaAlert(amda, status);
   }
 
-  /* Push an AMDA-generated alert — state-change-based, persisted to localStorage */
+  /* Push an AMDA-generated alert — written to Supabase (admin only); realtime fans it out. */
   let _lastAmdaAlert = 0;
   function pushAmdaAlert(amda, status) {
     /* Allow same state to re-alert after 5 minutes */
@@ -1249,38 +1241,88 @@ if (recs.length === 1) { // only disclaimer was added
                + ' Score: ' + amda.score + '/100.'
                + ' Days of supply: ~' + amda.daysRemaining + 'd.'
                + (amda.predictions?.timeToDepleteH ? ' Depletion in ~' + (amda.predictions.timeToDepleteH/24).toFixed(1) + 'd.' : ''),
-      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     };
 
-    DEFAULT_ALERTS.unshift(rec);
-    if (DEFAULT_ALERTS.length > 20) DEFAULT_ALERTS.pop();
-    saveToStorage('alerts', DEFAULT_ALERTS);
+    /* Only the admin (device-connected) browser writes alerts; the realtime
+       subscription in loadAlerts() then updates every viewer's list. */
+    const sb = window._supabase;
+    if (sb && state.role === 'admin') {
+      sb.from('alerts').insert({ type: rec.type, title: rec.title, message: rec.message })
+        .then(({ error }) => { if (error) console.warn('alert insert failed:', error.message); });
+    }
 
-    /* Re-render alert list immediately if visible */
-    if (state.currentPage === 'alerts') renderAlerts();
-
-    /* Browser push notification */
+    /* Browser push notification (immediate, local) */
     pushNotify(rec.title, rec.message);
   }
 
   /* ──────────────────────────────────────────
      ALERTS
      ────────────────────────────────────────── */
+  /* Relative time like "10 min ago" from an ISO timestamp. */
+  function timeAgo(iso) {
+    const s = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 1000));
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return m + ' min ago';
+    const h = Math.floor(m / 60); if (h < 24) return h + ' hr' + (h > 1 ? 's' : '') + ' ago';
+    const d = Math.floor(h / 24); return d + ' day' + (d > 1 ? 's' : '') + ' ago';
+  }
+
+  /* Load alerts from Supabase and subscribe to new ones (realtime). */
+  let _alertsSubscribed = false;
+  async function loadAlerts() {
+    const sb = window._supabase;
+    if (!sb) return;
+    const { data } = await sb.from('alerts').select('*').order('created_at', { ascending: false }).limit(20);
+    DEFAULT_ALERTS.length = 0;
+    if (data) data.forEach(a => DEFAULT_ALERTS.push({ type: a.type, title: a.title, message: a.message, time: timeAgo(a.created_at) }));
+    renderAlerts();
+    const sa = document.getElementById('statAlerts'); if (sa) sa.textContent = DEFAULT_ALERTS.length;
+    if (!_alertsSubscribed) {
+      _alertsSubscribed = true;
+      sb.channel('rg-alerts')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'alerts' }, (p) => {
+          const a = p.new;
+          DEFAULT_ALERTS.unshift({ type: a.type, title: a.title, message: a.message, time: timeAgo(a.created_at) });
+          if (DEFAULT_ALERTS.length > 20) DEFAULT_ALERTS.pop();
+          renderAlerts();
+          const s2 = document.getElementById('statAlerts'); if (s2) s2.textContent = DEFAULT_ALERTS.length;
+        })
+        .subscribe();
+    }
+  }
+
+  /* Clear all alert history (admin only — RLS-enforced). */
+  async function clearAlerts() {
+    if (!confirm('Clear all alert history?')) return;
+    const sb = window._supabase;
+    if (!sb || state.role !== 'admin') { showToast('Only an admin can clear alert history.'); return; }
+    const { error } = await sb.from('alerts').delete().gte('id', 0);
+    if (error) { showToast('Clear failed: ' + error.message); return; }
+    DEFAULT_ALERTS.length = 0;
+    renderAlerts();
+    const sa = document.getElementById('statAlerts'); if (sa) sa.textContent = 0;
+    showToast('Alert history cleared.');
+  }
+
   function renderAlerts() {
     const list = $('#alertList');
     if (!list) return;
     const icons = { warning: '⚠️', critical: '🔶', danger: '🔴', info: 'ℹ️' };
-    list.innerHTML = DEFAULT_ALERTS.map(a => `
-      <div class="alert-item ${a.type}">
-        <div class="alert-icon">${icons[a.type] || '📌'}</div>
-        <div class="alert-content">
-          <div class="alert-title">${a.title}</div>
-          <div class="alert-message">${a.message}</div>
+    if (!DEFAULT_ALERTS.length) {
+      list.innerHTML = '<div class="text-sm text-muted" style="padding:1rem;text-align:center;">No alerts yet.</div>';
+    } else {
+      list.innerHTML = DEFAULT_ALERTS.map(a => `
+        <div class="alert-item ${a.type}">
+          <div class="alert-icon">${icons[a.type] || '📌'}</div>
+          <div class="alert-content">
+            <div class="alert-title">${sanitizeText(a.title)}</div>
+            <div class="alert-message">${sanitizeText(a.message)}</div>
+          </div>
+          <div class="alert-time">${sanitizeText(a.time)}</div>
         </div>
-        <div class="alert-time">${a.time}</div>
-      </div>
-    `).join('');
-    $('#alertCount').textContent = DEFAULT_ALERTS.length + ' alerts';
+      `).join('');
+    }
+    const cnt = $('#alertCount'); if (cnt) cnt.textContent = DEFAULT_ALERTS.length + ' alerts';
   }
 
   /* ─────────────────────────────────────────
@@ -1983,6 +2025,9 @@ if (recs.length === 1) { // only disclaimer was added
     /* Live read-back from Supabase Realtime (used when no local serial feed) */
     SensorHub.subscribeRemote();
 
+    /* Load alerts from Supabase + subscribe to new ones */
+    loadAlerts();
+
     /* Fetch weather forecast using browser Geolocation if available,
        falling back to Metro Manila, Philippines (14.5995°N, 120.9842°E) */
     if (navigator.geolocation) {
@@ -2007,5 +2052,6 @@ if (recs.length === 1) { // only disclaimer was added
     deleteDevice,
     connectSerial:    () => SerialManager.connect(),
     disconnectSerial: () => SerialManager.disconnect(),
+    clearAlerts,
   };
 })();

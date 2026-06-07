@@ -466,11 +466,7 @@
                             <div class="card-title">Alert History</div>
                             <div style="display:flex;align-items:center;gap:.75rem;">
                                 <span class="text-sm text-muted" id="alertCount">6 alerts</span>
-                                <button class="btn btn-secondary btn-sm" onclick="(function(){
-                                  if(!confirm('Clear all alert history?')) return;
-                                  localStorage.removeItem('rg_alerts');
-                                  location.reload();
-                                })()">🗑 Clear History</button>
+                                <button class="btn btn-secondary btn-sm" onclick="RainGuard.clearAlerts()">🗑 Clear History</button>
                             </div>
                         </div>
                         <div class="alert-list" id="alertList">

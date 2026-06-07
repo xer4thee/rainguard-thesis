@@ -193,6 +193,13 @@ try {
       page.click('#downloadCsvBtn').catch(() => {}),
     ]).then(([d]) => d);
     check('CSV export downloads a file', !!dl && /\.csv$/.test(dl.suggestedFilename()), dl ? dl.suggestedFilename() : 'no download');
+    // Alerts page shows real alerts loaded from Supabase
+    await page.evaluate(() => { window.location.hash = 'alerts'; });
+    const alertsShown = await page.waitForFunction(() => {
+      const l = document.querySelector('#alertList');
+      return l && l.querySelectorAll('.alert-item').length > 0;
+    }, null, { timeout: 8000 }).then(() => true).catch(() => false);
+    check('alerts page shows alerts from Supabase', alertsShown);
     await ctx.close();
   }
 
