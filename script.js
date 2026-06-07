@@ -1472,26 +1472,29 @@ if (recs.length === 1) { // only disclaimer was added
       });
     }
 
-    // CSV download
-    $('#downloadCsvBtn').addEventListener('click', () => {
-      const rows = [
-        ['Date', 'Usage (L)'],
-        ['2026-02-10', '420'],
-        ['2026-02-11', '380'],
-        ['2026-02-12', '510'],
-        ['2026-02-13', '450'],
-        ['2026-02-14', '470'],
-        ['2026-02-15', '320'],
-        ['2026-02-16', '390'],
-      ];
+    // CSV download — real sensor_readings (last 30 days)
+    $('#downloadCsvBtn').addEventListener('click', async () => {
+      const sb = window._supabase;
+      let rows = [['recorded_at', 'level_percent', 'inflow_lph', 'outflow_lph', 'temp_c']];
+      if (sb) {
+        const since = new Date(Date.now() - 30 * 24 * 3600e3).toISOString();
+        const { data, error } = await sb.from('sensor_readings')
+          .select('recorded_at, level_percent, inflow_lph, outflow_lph, temp_c')
+          .gte('recorded_at', since)
+          .order('recorded_at', { ascending: true })
+          .limit(10000);
+        if (error) { showToast('Export failed: ' + error.message); return; }
+        if (!data || !data.length) { showToast('No sensor data to export yet.'); return; }
+        rows = rows.concat(data.map(r => [r.recorded_at, r.level_percent, r.inflow_lph, r.outflow_lph, r.temp_c]));
+      }
       const csv = rows.map(r => r.join(',')).join('\n');
       const blob = new Blob([csv], { type: 'text/csv' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = 'rainguard_usage_data.csv';
+      a.href = url; a.download = 'rainguard_sensor_readings.csv';
       a.click();
       URL.revokeObjectURL(url);
-      showToast('CSV downloaded!');
+      showToast('CSV exported (' + (rows.length - 1) + ' rows)!');
     });
   }
 

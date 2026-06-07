@@ -186,6 +186,12 @@ try {
     await page.waitForTimeout(1500);
     const aErrors = errors.slice(aBefore).filter(e => !/geolocation|permissions policy|favicon/i.test(e));
     check('analytics charts render without console errors', aErrors.length === 0, aErrors.slice(0, 2).join(' | '));
+    // CSV export downloads a file built from real sensor_readings
+    const dl = await Promise.all([
+      page.waitForEvent('download', { timeout: 8000 }).catch(() => null),
+      page.click('#downloadCsvBtn').catch(() => {}),
+    ]).then(([d]) => d);
+    check('CSV export downloads a file', !!dl && /\.csv$/.test(dl.suggestedFilename()), dl ? dl.suggestedFilename() : 'no download');
     await ctx.close();
   }
 
