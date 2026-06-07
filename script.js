@@ -920,9 +920,8 @@ if (recs.length === 1) { // only disclaimer was added
     return { label: 'Normal', cls: 'normal' };
   }
 
-  /* Load the Overview "Water Usage" chart for a day/week/month range from Supabase history. */
-  async function loadOverviewRange(range) {
-    const chart = state.charts.dailyUsage;
+  /* Load a chart with day/week/month avg-tank-level history from Supabase (Overview + Analytics). */
+  async function loadRangeChart(chart, range) {
     if (!chart) return;
     const sb = window._supabase;
     const now = Date.now();
@@ -998,10 +997,10 @@ if (recs.length === 1) { // only disclaimer was added
         rangeEl.querySelectorAll('.range-btn').forEach(b => b.addEventListener('click', () => {
           rangeEl.querySelectorAll('.range-btn').forEach(x => x.classList.remove('active'));
           b.classList.add('active');
-          loadOverviewRange(b.dataset.range);
+          loadRangeChart(state.charts.dailyUsage, b.dataset.range);
         }));
       }
-      loadOverviewRange('day');
+      loadRangeChart(state.charts.dailyUsage, 'day');
     }
 
     /* ── Weekly Consumption Chart ──
@@ -1348,20 +1347,31 @@ if (recs.length === 1) { // only disclaimer was added
     // Daily line
     const c1 = $('#chartAnalyticsDaily');
     if (c1) {
-      new Chart(c1, {
+      state.charts.analyticsDaily = new Chart(c1, {
         type: 'line',
         data: {
-          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+          labels: [],
           datasets: [{
-            label: 'Daily Usage (L)',
-            data: [420, 380, 510, 450, 470, 320, 390],
+            label: 'Avg Tank Level (%)',
+            data: [],
             borderColor: '#1976D2',
             backgroundColor: 'rgba(25,118,210,.1)',
             fill: true, tension: .4, pointRadius: 4,
           }]
         },
-        options: chartOptions('Daily Usage (L)')
+        options: chartOptions('Avg Tank Level (%)')
       });
+
+      /* Day / Week / Month range toggle (Analytics) → real Supabase history */
+      const aRange = $('#analyticsRange');
+      if (aRange) {
+        aRange.querySelectorAll('.range-btn').forEach(b => b.addEventListener('click', () => {
+          aRange.querySelectorAll('.range-btn').forEach(x => x.classList.remove('active'));
+          b.classList.add('active');
+          loadRangeChart(state.charts.analyticsDaily, b.dataset.range);
+        }));
+      }
+      loadRangeChart(state.charts.analyticsDaily, 'day');
     }
 
     // Weekly bar
@@ -1757,6 +1767,41 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      LGU DASHBOARD
      ────────────────────────────────────────── */
+  /* Fill the LGU stat cards from real Supabase data (best-effort; leaves defaults on failure). */
+  async function loadLguStats() {
+    const sb = window._supabase;
+    const alertEl = document.getElementById('lguActiveAlerts');
+    if (alertEl) alertEl.textContent = DEFAULT_ALERTS.length;
+    if (!sb) return;
+    try {
+      const { data: cs } = await sb.from('current_status').select('amda_score').eq('id', 1).single();
+      if (cs && typeof cs.amda_score === 'number') {
+        const el = document.getElementById('lguAmdaConfidence');
+        if (el) el.textContent = cs.amda_score + '%';
+      }
+      const since = new Date(Date.now() - 30 * 24 * 3600e3).toISOString();
+      const { data: rows } = await sb.from('sensor_readings')
+        .select('level_percent, source, recorded_at')
+        .gte('recorded_at', since)
+        .order('recorded_at', { ascending: true })
+        .limit(5000);
+      if (Array.isArray(rows)) {
+        const sources = new Set(rows.map(r => r.source || 'esp32'));
+        const sysEl = document.getElementById('lguTotalSystems');
+        if (sysEl) sysEl.textContent = String(Math.max(1, sources.size));
+        /* "Water collected" estimate: sum of positive level rises × tank capacity */
+        const cap = state.settings.capacity || 20;
+        let collected = 0, prev = null;
+        for (const r of rows) {
+          if (prev !== null && r.level_percent > prev) collected += ((r.level_percent - prev) / 100) * cap;
+          prev = r.level_percent;
+        }
+        const waterEl = document.getElementById('lguTotalWater');
+        if (waterEl) waterEl.textContent = fmt(Math.round(collected)) + ' L';
+      }
+    } catch (_) { /* leave the placeholder values */ }
+  }
+
   function initLguCharts() {
     const c1 = $('#chartLguRegional');
     if (c1) {
@@ -1797,6 +1842,8 @@ if (recs.length === 1) { // only disclaimer was added
         options: chartOptions('Aggregated Consumption (L)')
       });
     }
+
+    loadLguStats();
   }
 
   /* ──────────────────────────────────────────

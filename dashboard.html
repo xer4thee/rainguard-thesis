@@ -554,7 +554,12 @@
                 <div class="charts-grid">
                     <div class="chart-card">
                         <div class="card-header">
-                            <div class="card-title">Daily Water Usage</div>
+                            <div class="card-title">Water Usage</div>
+                            <div class="range-toggle" id="analyticsRange">
+                                <button type="button" data-range="day" class="range-btn active">Day</button>
+                                <button type="button" data-range="week" class="range-btn">Week</button>
+                                <button type="button" data-range="month" class="range-btn">Month</button>
+                            </div>
                         </div>
                         <canvas id="chartAnalyticsDaily"></canvas>
                     </div>

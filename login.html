@@ -43,8 +43,7 @@
           Log In
         </button>
 
-        <a href="#" class="forgot-link"
-          onclick="alert('Password reset is not available in this demo.');return false;">Forgot Password?</a>
+        <a href="#" class="forgot-link" id="forgotLink">Forgot Password?</a>
       </form>
 
       <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border-light);text-align:center;">
@@ -142,6 +141,18 @@
           errEl.textContent = 'Invalid email or password. ' + left + ' attempt' + (left !== 1 ? 's' : '') + ' remaining.';
         }
       }
+    });
+
+    /* Forgot password → send a Supabase reset email (uses the email typed above) */
+    document.getElementById('forgotLink').addEventListener('click', async function (e) {
+      e.preventDefault();
+      const email = document.getElementById('username').value.trim().toLowerCase().slice(0, 64);
+      if (!email) { errEl.textContent = 'Enter your email above first, then click Forgot Password.'; return; }
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin + '/reset.html'
+      });
+      errEl.textContent = error ? error.message
+        : '✓ If that email exists, a password reset link has been sent. Check your inbox.';
     });
   </script>
 </body>

@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://zhfehohjkafrcwwqexdy.supabase.co wss://zhfehohjkafrcwwqexdy.supabase.co;">
+  <title>RainGuard — Reset Password</title>
+  <meta name="description" content="Set a new password for your RainGuard account.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+</head>
+<body>
+  <div class="login-wrapper">
+    <div class="login-card">
+      <div class="login-logo">
+        <div class="logo-icon">
+          <svg viewBox="0 0 24 24"><path d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z"/></svg>
+        </div>
+        <h1>Reset Password</h1>
+        <p>Set a new password</p>
+      </div>
+
+      <form id="resetForm" autocomplete="off">
+        <div id="resetError" class="login-error"></div>
+        <div id="resetSuccess" class="login-error" style="background:rgba(76,175,80,.12);color:#2E7D32;display:none;"></div>
+
+        <div class="form-group">
+          <label for="password">New Password</label>
+          <input type="password" id="password" placeholder="At least 6 characters" required minlength="6" maxlength="64" autocomplete="new-password">
+        </div>
+
+        <div class="form-group">
+          <label for="confirm">Confirm New Password</label>
+          <input type="password" id="confirm" placeholder="Re-enter your new password" required minlength="6" maxlength="64" autocomplete="new-password">
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="resetBtn" style="justify-content:center;">Update Password</button>
+      </form>
+
+      <div style="margin-top:1.5rem;padding-top:1rem;border-top:1px solid var(--border-light);text-align:center;">
+        <p style="font-size:.85rem;color:var(--text-muted);">
+          <a href="login.html" style="color:var(--primary);font-weight:600;">Back to Log In</a>
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+    const supabase = createClient(
+      'https://zhfehohjkafrcwwqexdy.supabase.co',
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU'
+    );
+    window._supabase = supabase;
+
+    const errEl = document.getElementById('resetError');
+    const okEl  = document.getElementById('resetSuccess');
+    const btn   = document.getElementById('resetBtn');
+
+    /* The recovery link in the email establishes a temporary session (detected from the URL). */
+    let recoveryReady = false;
+    supabase.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') recoveryReady = true; });
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session) recoveryReady = true;
+    if (!recoveryReady) {
+      errEl.textContent = 'Open this page from the password-reset link in your email.';
+    }
+
+    document.getElementById('resetForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+      errEl.textContent = ''; okEl.style.display = 'none';
+
+      const password = document.getElementById('password').value;
+      const confirm  = document.getElementById('confirm').value;
+      if (password.length < 6) { errEl.textContent = 'Password must be at least 6 characters.'; return; }
+      if (password !== confirm) { errEl.textContent = 'Passwords do not match.'; return; }
+
+      btn.disabled = true; btn.textContent = 'Updating…';
+      const { error } = await supabase.auth.updateUser({ password });
+      btn.disabled = false; btn.textContent = 'Update Password';
+
+      if (error) {
+        errEl.textContent = /session|missing|expired/i.test(error.message)
+          ? 'Reset link is invalid or expired. Request a new one from the login page.'
+          : error.message;
+        return;
+      }
+      okEl.style.display = 'block';
+      okEl.textContent = 'Password updated! Redirecting to log in…';
+      setTimeout(() => { window.location.href = 'login.html'; }, 1800);
+    });
+  </script>
+</body>
+</html>

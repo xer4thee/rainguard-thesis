@@ -235,6 +235,7 @@ RainGuard/
 ├── index.html                 ← Public landing page (Log In / Register)
 ├── login.html                 ← Login (Supabase Auth)
 ├── register.html              ← Sign-up (Supabase Auth)
+├── reset.html                 ← Password reset (Supabase Auth)
 ├── dashboard.html             ← Main application dashboard
 ├── script.js                  ← AMDA engine, SensorHub, SerialManager, Supabase client
 ├── style.css                  ← Design system and styling

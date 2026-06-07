@@ -82,6 +82,8 @@ try {
     check('landing has NO login form (moved to login.html)', (await page.locator('#loginForm').count()) === 0);
     await page.goto(`${ORIGIN}/register.html`, { waitUntil: 'networkidle' });
     check('register page has signup form', (await page.locator('#registerForm').count()) > 0);
+    await page.goto(`${ORIGIN}/reset.html`, { waitUntil: 'networkidle' });
+    check('reset page has password form', (await page.locator('#resetForm').count()) > 0);
     await ctx.close();
   }
 
@@ -96,6 +98,7 @@ try {
     await page.waitForTimeout(3000);
     const err = (await page.textContent('#loginError').catch(() => '')) || '';
     check('bad password rejected & stays on login', page.url().includes('login.html') && /invalid/i.test(err), `err="${err.trim()}"`);
+    check('login has Forgot Password link', (await page.locator('#forgotLink').count()) > 0);
     await ctx.close();
   }
 
@@ -167,17 +170,23 @@ try {
     });
     check('range toggle switches to Week', weekActive);
     check('tank monitoring has LIVE badge', (await page.locator('#tmLiveBadge').count()) > 0);
+    check('analytics has Day/Week/Month toggle', (await page.locator('#analyticsRange .range-btn').count()) === 3);
     await ctx.close();
   }
 
-  // ── 5. LGU: lands on lgu-dashboard ──
+  // ── 5. LGU: lands on lgu-dashboard; cards load from real data ──
   {
-    const { ctx, page } = await loginAs(browser, 'lgu@rainguard.io', 'lgu123');
+    const { ctx, page, errors } = await loginAs(browser, 'lgu@rainguard.io', 'lgu123');
     const lguVisible = await page.evaluate(() => {
       const el = document.querySelector('#page-lgu-dashboard');
       return !!el && !el.classList.contains('hidden');
     });
     check('lgu default page = lgu-dashboard', lguVisible);
+    await page.waitForTimeout(1500); // let loadLguStats() run
+    const conf = await page.evaluate(() => document.querySelector('#lguAmdaConfidence')?.textContent || '');
+    check('lgu AMDA confidence is a percentage', /^\d+%$/.test(conf.trim()), `conf="${conf.trim()}"`);
+    const lguErrors = errors.filter((e) => !/geolocation|permissions policy|favicon/i.test(e));
+    check('no console errors on lgu dashboard', lguErrors.length === 0, lguErrors.slice(0, 2).join(' | '));
     await ctx.close();
   }
 
