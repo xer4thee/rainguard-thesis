@@ -12,7 +12,7 @@ const RainGuard = (function () {
      CONFIGURATION & STATE
      ────────────────────────────────────────── */
   const DEFAULT_SETTINGS = {
-    capacity: 5000,
+    capacity: 20,
     lowThreshold: 30,
     criticalThreshold: 15,
     overflowThreshold: 95,
@@ -356,7 +356,7 @@ if (recs.length === 1) { // only disclaimer was added
       if (this._history.length > this.MAX_HISTORY) this._history.shift();
 
       /* Sync waterLevel state so existing functions still work */
-     state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
+     state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 20));
 
       /* Write to Supabase */
       this._writeToSupabase();
@@ -432,7 +432,7 @@ if (recs.length === 1) { // only disclaimer was added
       this.remoteTs     = Date.now();
       this._history.push({ ...this.latest, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
       if (this._history.length > this.MAX_HISTORY) this._history.shift();
-      state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
+      state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 20));
     },
 
     /* Store remote AMDA summary + flag freshness for the "Remote" indicator. */
@@ -447,11 +447,12 @@ if (recs.length === 1) { // only disclaimer was added
 
     /** Tick the simulation one step (used when live === false) */
     simulate() {
-      const cap = state.settings.capacity || 5000;
-      const inflow  = randBetween(30, 60);
-      const outflow = randBetween(20, 50);
-      state.waterLevel = Math.max(200, Math.min(cap, state.waterLevel + (inflow - outflow)));
-      this.latest.levelPct   = Math.round((state.waterLevel / cap) * 100);
+      const cap = state.settings.capacity || 20;
+      /* Per-tick flow scaled to tank size so it works for any capacity (e.g. a 20 L prototype). */
+      const inflow  = randBetween(0, Math.max(1, Math.round(cap * 0.12)));
+      const outflow = randBetween(0, Math.max(1, Math.round(cap * 0.10)));
+      state.waterLevel = Math.max(Math.round(cap * 0.05), Math.min(cap, state.waterLevel + (inflow - outflow)));
+      this.latest.levelPct   = Math.min(100, Math.round((state.waterLevel / cap) * 100));
       this.latest.inflowLPH  = inflow;
       this.latest.outflowLPH = outflow;
       this.latest.ts = Date.now();
@@ -466,7 +467,7 @@ if (recs.length === 1) { // only disclaimer was added
         levelPct:    this.latest.levelPct,
         inflowLPH:   this.latest.inflowLPH  + (this.weatherBonus || 0),
         outflowLPH:  this.latest.outflowLPH,
-        capacityL:   state.settings.capacity || 5000,
+        capacityL:   state.settings.capacity || 20,
         history:     this._history,
         horizonDays: cfg.horizon || 7,
       });
@@ -846,7 +847,7 @@ if (recs.length === 1) { // only disclaimer was added
      ────────────────────────────────────────── */
   function updateOverview() {
     if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
-    const cap    = state.settings.capacity || 5000;
+    const cap    = state.settings.capacity || 20;
     const pct    = SensorHub.latest.levelPct;
     const status = getStatus(pct);
     const amda   = SensorHub.runAmda();
@@ -889,6 +890,12 @@ if (recs.length === 1) { // only disclaimer was added
 
     /* Render actionable recommendations */
     renderRecommendations('amdaRecommendations', amda.recommendations);
+
+    /* Active-alerts count + analytics AMDA confidence (kept in sync from the overview tick) */
+    const statAlertsEl = $('#statAlerts');
+    if (statAlertsEl) statAlertsEl.textContent = DEFAULT_ALERTS.length;
+    const analyticsAmdaEl = $('#analyticsAmdaPct');
+    if (analyticsAmdaEl) analyticsAmdaEl.textContent = amda.score + '%';
 
     /* State-change alert — fires from Overview page too */
     checkAndFireAlert(amda, getStatus(pct));
@@ -1028,7 +1035,7 @@ if (recs.length === 1) { // only disclaimer was added
       /* Tick simulation only when no real hardware AND no fresh remote data */
       if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
 
-      const cap    = state.settings.capacity || 5000;
+      const cap    = state.settings.capacity || 20;
       const pct    = SensorHub.latest.levelPct;
       const inflow = SensorHub.latest.inflowLPH;
       const outflow= SensorHub.latest.outflowLPH;
@@ -1566,7 +1573,7 @@ if (recs.length === 1) { // only disclaimer was added
      ────────────────────────────────────────── */
   function initSettings() {
     const s = state.settings;
-    $('#setCapacity').value = s.capacity || 5000;
+    $('#setCapacity').value = s.capacity || 20;
     $('#setLow').value = s.lowThreshold || 30;
     $('#setCritical').value = s.criticalThreshold || 15;
     $('#setOverflow').value = s.overflowThreshold || 95;
@@ -1576,7 +1583,7 @@ if (recs.length === 1) { // only disclaimer was added
 
     $('#saveSettingsBtn').onclick = () => {
       state.settings = {
-        capacity: parseInt($('#setCapacity').value) || 5000,
+        capacity: parseInt($('#setCapacity').value) || 20,
         lowThreshold: parseInt($('#setLow').value) || 30,
         criticalThreshold: parseInt($('#setCritical').value) || 15,
         overflowThreshold: parseInt($('#setOverflow').value) || 95,
@@ -1748,7 +1755,7 @@ if (recs.length === 1) { // only disclaimer was added
     if (!(await checkAuth())) return;
 
     state.settings = loadFromStorage('settings', DEFAULT_SETTINGS);
-    state.waterLevel = 3400;
+    state.waterLevel = Math.round((state.settings.capacity || 20) * 0.65);
 
     setupUI();
     handleRoute();

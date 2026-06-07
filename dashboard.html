@@ -163,9 +163,8 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="statWaterLevel">4,250 L</h3>
+                            <h3 id="statWaterLevel">—</h3>
                             <p>Current Water Level</p>
-                            <div class="stat-change up">↑ 12% from yesterday</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -190,9 +189,8 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="statAlerts">2</h3>
+                            <h3 id="statAlerts">—</h3>
                             <p>Active Alerts</p>
-                            <div class="stat-change down">↑ 1 new alert</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -202,7 +200,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="statAMDA">87%</h3>
+                            <h3 id="statAMDA">—</h3>
                             <p>AMDA Prediction</p>
                             <div class="stat-change up">System healthy</div>
                         </div>
@@ -218,8 +216,8 @@
                         </div>
                         <div class="tank-visual">
                             <div class="tank-container">
-                                <div class="tank-water" id="tankWater" style="height:68%"></div>
-                                <div class="tank-percent" id="tankPercent">68%</div>
+                                <div class="tank-water" id="tankWater" style="height:0%"></div>
+                                <div class="tank-percent" id="tankPercent">—</div>
                             </div>
                             <div class="tank-stats">
                                 <div class="tank-stat-item">
@@ -233,14 +231,14 @@
                                     <span class="dot" style="background:var(--status-normal)"></span>
                                     <div>
                                         <div class="label">Inflow</div>
-                                        <div class="value" id="tankInflow">45 L/hr</div>
+                                        <div class="value" id="tankInflow">—</div>
                                     </div>
                                 </div>
                                 <div class="tank-stat-item">
                                     <span class="dot" style="background:var(--status-critical)"></span>
                                     <div>
                                         <div class="label">Outflow</div>
-                                        <div class="value" id="tankOutflow">30 L/hr</div>
+                                        <div class="value" id="tankOutflow">—</div>
                                     </div>
                                 </div>
                                 <div class="tank-stat-item">
@@ -343,20 +341,19 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="tmWaterLevel">3,400 L</h3>
+                            <h3 id="tmWaterLevel">—</h3>
                             <p>Current Water Level</p>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon green">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <rect x="3" y="3" width="18" height="18" rx="2" />
-                                <line x1="12" y1="8" x2="12" y2="16" />
-                                <line x1="8" y1="12" x2="16" y2="12" />
+                                <ellipse cx="12" cy="5" rx="9" ry="3" />
+                                <path d="M3 5v14a9 3 0 0 0 18 0V5" />
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="tmCapacity">5,000 L</h3>
+                            <h3 id="tmCapacity">—</h3>
                             <p>Tank Capacity</p>
                         </div>
                     </div>
@@ -367,7 +364,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="tmInflow">45 L/hr</h3>
+                            <h3 id="tmInflow">—</h3>
                             <p>Inflow Rate</p>
                         </div>
                     </div>
@@ -378,7 +375,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="tmOutflow">30 L/hr</h3>
+                            <h3 id="tmOutflow">—</h3>
                             <p>Outflow Rate</p>
                         </div>
                     </div>
@@ -393,21 +390,21 @@
                         </div>
                         <div class="tank-visual">
                             <div class="tank-container" style="width:200px; height:280px;">
-                                <div class="tank-water" id="tmTankWater" style="height:68%"></div>
-                                <div class="tank-percent" id="tmTankPercent" style="font-size:2rem">68%</div>
+                                <div class="tank-water" id="tmTankWater" style="height:0%"></div>
+                                <div class="tank-percent" id="tmTankPercent" style="font-size:2rem">—</div>
                             </div>
                             <div class="tank-stats">
                                 <div class="tank-stat-item"><span class="dot" style="background:var(--primary)"></span>
                                     <div>
                                         <div class="label">Fill Level</div>
-                                        <div class="value" id="tmFillLevel">68%</div>
+                                        <div class="value" id="tmFillLevel">—</div>
                                     </div>
                                 </div>
                                 <div class="tank-stat-item"><span class="dot"
                                         style="background:var(--status-normal)"></span>
                                     <div>
                                         <div class="label">Net Flow</div>
-                                        <div class="value" id="tmNetFlow">+15 L/hr</div>
+                                        <div class="value" id="tmNetFlow">—</div>
                                     </div>
                                 </div>
                                 <div class="tank-stat-item"><span class="dot"
@@ -440,10 +437,10 @@
                     <div class="flex items-center gap-2 mt-1">
                         <div style="flex:1;">
                             <div class="amda-progress">
-                                <div class="amda-progress-bar" id="tmAmdaBar" style="width:87%"></div>
+                                <div class="amda-progress-bar" id="tmAmdaBar" style="width:0%"></div>
                             </div>
                         </div>
-                        <strong id="tmAmdaPercent" style="color:var(--primary);font-size:1.2rem;">87%</strong>
+                        <strong id="tmAmdaPercent" style="color:var(--primary);font-size:1.2rem;">—</strong>
                     </div>
                     <p class="text-sm text-muted mt-1" id="tmAmdaText">Water supply is projected to remain sufficient
                         for 7+ days.</p>
@@ -519,7 +516,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3>28,450 L</h3>
+                            <h3 id="analyticsTotal">—</h3>
                             <p>Total Collected (30d)</p>
                         </div>
                     </div>
@@ -531,9 +528,8 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3>5,200 L</h3>
+                            <h3 id="analyticsSavings">—</h3>
                             <p>Estimated Water Savings</p>
-                            <div class="stat-change up">↑ 18% vs last month</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -543,7 +539,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3 id="analyticsAmdaPct">87%</h3>
+                            <h3 id="analyticsAmdaPct">—</h3>
                             <p>AMDA Confidence</p>
                         </div>
                     </div>
@@ -615,7 +611,7 @@
                         </div>
                         <div class="stat-info">
                             <h3 id="adminTotalSystems">24</h3>
-                            <p>Total Active Systems</p>
+                            <p>Active Systems (this site)</p>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -788,7 +784,7 @@
                         <h3>Tank Configuration</h3>
                         <div class="form-row">
                             <label for="setCapacity">Tank Capacity (Liters)</label>
-                            <input type="number" id="setCapacity" value="5000" min="100">
+                            <input type="number" id="setCapacity" value="20" min="1">
                         </div>
                         <div class="form-row">
                             <label for="setLow">Low Level Threshold (%)</label>
@@ -859,7 +855,7 @@
                         <h3>Algorithm: AMDA</h3>
                         <div style="padding:.75rem;background:var(--primary-bg);border-radius:8px;margin-bottom:1rem;">
                             <strong style="color:var(--primary);">Adaptive Multi-parameter Decision Algorithm</strong>
-                            <p class="text-sm text-muted" style="margin-top:.4rem;line-height:1.7;">Analyses 5 weighted parameters (water level, flow rate, rate of change, days of supply, historical pattern) with temporal context to generate a composite score (0–100) mapped to 5 states: Sufficient, Adequate, Low, Critical, Emergency. Provides predictive analytics and specific actionable recommendations.</p>
+                            <p class="text-sm text-muted" style="margin-top:.4rem;line-height:1.7;">Analyses 5 weighted parameters (water level, flow rate, rate of change, days of supply, historical pattern) with temporal context to generate a composite score (0–100) mapped to 5 states: Critical High (≥90%), High (70–89%), Normal (30–69%), Low (20–29%), Critical Low (≤19%). Provides predictive analytics and specific actionable recommendations.</p>
                         </div>
                         <div class="form-row">
                             <label for="amdaHorizon">Forecast Horizon (days)</label>
@@ -1004,7 +1000,7 @@
                         <ol style="margin:.75rem 0 0 1.25rem;font-size:.88rem;line-height:1.9;color:var(--text-secondary);">
                             <li>Open Arduino IDE → Install <strong>ESP32 board support</strong> (Espressif)</li>
                             <li>Select board: <strong>ESP32 Dev Module</strong>, Upload speed: 115200</li>
-                            <li>Open <code>esp32_sketch.ino</code> → set <code>TANK_HEIGHT_CM</code> to your tank's real height</li>
+                            <li>Open <code>esp32_sketch.ino</code> → confirm <code>TANK_HEIGHT_CM</code> = <code>33</code> and <code>SENSOR_OFFSET_CM</code> = <code>3</code> (prototype values)</li>
                             <li>Upload → open Serial Monitor at 115200 to verify JSON output</li>
                             <li>Switch to the <strong>Live Connection</strong> tab → click <strong>Connect ESP32</strong></li>
                         </ol>
@@ -1098,8 +1094,8 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3>48</h3>
-                            <p>Total Active Systems</p>
+                            <h3 id="lguTotalSystems">48</h3>
+                            <p>Active Systems (region-wide)</p>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -1110,7 +1106,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3>285,000 L</h3>
+                            <h3 id="lguTotalWater">285,000 L</h3>
                             <p>Total Water Collected (30d)</p>
                         </div>
                     </div>
@@ -1122,7 +1118,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3>12</h3>
+                            <h3 id="lguActiveAlerts">12</h3>
                             <p>Active Alerts</p>
                         </div>
                     </div>
@@ -1133,7 +1129,7 @@
                             </svg>
                         </div>
                         <div class="stat-info">
-                            <h3>92%</h3>
+                            <h3 id="lguAmdaConfidence">92%</h3>
                             <p>AMDA Regional Confidence</p>
                         </div>
                     </div>

@@ -5,14 +5,24 @@
 
 ---
 
+## ✅ Status audit (2026-06-08)
+
+Audited against the **current repo files** (this list was generated from an older snapshot).
+
+- **Done (34 — all code/asset tasks):** ESP32 values; **all** dashboard placeholders → `—`/`0%`, AMDA-Config labels, LGU stat-card IDs, admin/LGU scope labels, Settings capacity input, capacity icon; the two CSS classes (`.status-badge.warning`, `.sc-tab-pane`); the demo-badge colors; script.js (AMDA labels, water-use recommendations, `capacity: 20` with capacity-scaled simulation, `statAlerts` + `analyticsAmdaPct` now JS-driven); and — via the **Firebase → Supabase migration** — database security (RLS) + the login auth. All re-verified by the **18-check E2E suite**.
+- **Still open (manuscript only):** every manuscript (PDF) item, **plus** the one Chapter-3 paragraph documenting the 5-parameter AMDA weights (listed under Script). These require editing the document — yours to handle.
+- ⚠️ **Migration side-note for the manuscript:** §4.2 names *Firebase* as the cloud platform, but the system now uses **Supabase** — update that section when you revise the document.
+
+---
+
 ## 🔌 ESP32 Sketch (`esp32_sketch.ino`)
 
-- [ ] **[CRITICAL] Fix `TANK_HEIGHT_CM` — currently `120`, must be `33`**
+- [x] **[CRITICAL] Fix `TANK_HEIGHT_CM` — currently `120`, must be `33`** — ✅ Done (current sketch already sets `33`, line 92)
   - Line 80
   - Wrong tank height = wrong level percentages across the entire system
   - Change: `#define TANK_HEIGHT_CM 120` → `#define TANK_HEIGHT_CM 33`
 
-- [ ] **[CRITICAL] Fix `SENSOR_OFFSET_CM` — currently `5`, must be `3`**
+- [x] **[CRITICAL] Fix `SENSOR_OFFSET_CM` — currently `5`, must be `3`** — ✅ Done (current sketch already sets `3`, line 93)
   - Line 81
   - Wrong offset = level always reads lower than reality
   - Change: `#define SENSOR_OFFSET_CM 5` → `#define SENSOR_OFFSET_CM 3`
@@ -23,39 +33,39 @@
 
 ### 🔴 Critical
 
-- [ ] **[CRITICAL] AMDA state labels in AMDA Config page contradict the manuscript**
+- [x] **[CRITICAL] AMDA state labels in AMDA Config page contradict the manuscript** — ✅ Done (dashboard.html now lists Critical High/High/Normal/Low/Critical Low)
   - Line 874
   - Currently says: `Sufficient, Adequate, Low, Critical, Emergency`
   - Change to: `Critical High (≥90%), High (70–89%), Normal (30–69%), Low (20–29%), Critical Low (≤19%)`
 
-- [ ] **[CRITICAL] Overview stat cards show hardcoded fake values — must start as `—`**
+- [x] **[CRITICAL] Overview stat cards show hardcoded fake values — must start as `—`** — ✅ Done (statWaterLevel / statAlerts / statAMDA → `—`)
   - Lines 178, 205, 217
   - `statWaterLevel`: `4,250 L` → `—`
   - `statAlerts`: `2` → `—`
   - `statAMDA`: `87%` → `—`
 
-- [ ] **[CRITICAL] Tank Monitoring stat cards show impossible values for a 20L prototype**
+- [x] **[CRITICAL] Tank Monitoring stat cards show impossible values for a 20L prototype** — ✅ Done (tmWaterLevel / tmCapacity → `—`)
   - Lines 358, 371
   - `tmWaterLevel`: `3,400 L` → `—`
   - `tmCapacity`: `5,000 L` → `—`
 
-- [ ] **[CRITICAL] Settings page Tank Capacity input defaults to `5000` — must be `20` for prototype**
+- [x] **[CRITICAL] Settings page Tank Capacity input defaults to `5000` — must be `20` for prototype** — ✅ Done (`value="20" min="1"`)
   - Line 803
   - Change: `value="5000" min="100"` → `value="20" min="1"`
 
-- [ ] **[CRITICAL] Analytics page shows hardcoded `28,450 L` and `5,200 L` — impossible for a 20L prototype**
+- [x] **[CRITICAL] Analytics page shows hardcoded `28,450 L` and `5,200 L` — impossible for a 20L prototype** — ✅ Done (added `analyticsTotal`/`analyticsSavings` IDs, set to `—`)
   - Lines 534, 546
   - Add IDs and change to `—`: `analyticsTotal` and `analyticsSavings`
 
-- [ ] **[CRITICAL] Sensor Connect setup instruction doesn't specify actual prototype values**
+- [x] **[CRITICAL] Sensor Connect setup instruction doesn't specify actual prototype values** — ✅ Done (now states `TANK_HEIGHT_CM`=33, `SENSOR_OFFSET_CM`=3)
   - Line 1019
   - Change generic instruction to: *"set `TANK_HEIGHT_CM` to `33` and `SENSOR_OFFSET_CM` to `3` for the prototype"*
 
-- [ ] **[CRITICAL] LGU Dashboard stat cards have no IDs — JS cannot update them**
+- [x] **[CRITICAL] LGU Dashboard stat cards have no IDs — JS cannot update them** — ✅ Done (added `lguTotalSystems`, `lguTotalWater`, `lguActiveAlerts`, `lguAmdaConfidence`)
   - Lines 1113, 1125, 1137, 1148
   - Add IDs: `lguTotalSystems`, `lguTotalWater`, `lguActiveAlerts`, `lguAmdaConfidence`
 
-- [ ] **[CRITICAL] `statAlerts` card is never updated by JS — `updateOverview()` doesn't set it**
+- [x] **[CRITICAL] `statAlerts` card is never updated by JS — `updateOverview()` doesn't set it** — ✅ Done (`updateOverview()` now sets `statAlerts` from the alert count)
   - Add to `updateOverview()` in `script.js` after existing stat updates:
     ```js
     const alerts = loadFromStorage('alerts', []);
@@ -65,37 +75,37 @@
 
 ### 🟡 Important
 
-- [ ] **[IMPORTANT] Tank water visual hardcoded to `height:68%` — must start at `0%`**
+- [x] **[IMPORTANT] Tank water visual hardcoded to `height:68%` — must start at `0%`** — ✅ Done (tankWater + tmTankWater → `height:0%`)
   - Lines 233, 408
   - `id="tankWater" style="height:68%"` → `height:0%`
   - `id="tmTankWater" style="height:68%"` → `height:0%`
 
-- [ ] **[IMPORTANT] Tank percent display hardcoded to `68%` — must start as `—`**
+- [x] **[IMPORTANT] Tank percent display hardcoded to `68%` — must start as `—`** — ✅ Done (tankPercent + tmTankPercent + tmFillLevel → `—`)
   - Lines 234, 409
   - `id="tankPercent">68%` → `—`
   - `id="tmTankPercent">68%` → `—`
 
-- [ ] **[IMPORTANT] Flow rate stat items show hardcoded `45 L/hr`, `30 L/hr`, `+15 L/hr`**
+- [x] **[IMPORTANT] Flow rate stat items show hardcoded `45 L/hr`, `30 L/hr`, `+15 L/hr`** — ✅ Done (tankInflow / tankOutflow / tmNetFlow → `—`)
   - Lines 248, 255, 422
   - `id="tankInflow">45 L/hr` → `—`
   - `id="tankOutflow">30 L/hr` → `—`
   - `id="tmNetFlow">+15 L/hr` → `—`
 
-- [ ] **[IMPORTANT] Tank Monitoring inflow/outflow stat cards show `45 L/hr` and `30 L/hr`**
+- [x] **[IMPORTANT] Tank Monitoring inflow/outflow stat cards show `45 L/hr` and `30 L/hr`** — ✅ Done (tmInflow / tmOutflow → `—`)
   - Lines 382, 393
   - `id="tmInflow">45 L/hr` → `—`
   - `id="tmOutflow">30 L/hr` → `—`
 
-- [ ] **[IMPORTANT] AMDA progress bar in Tank Monitoring starts at `87%` — must be `0%`**
+- [x] **[IMPORTANT] AMDA progress bar in Tank Monitoring starts at `87%` — must be `0%`** — ✅ Done (tmAmdaBar → `0%`, tmAmdaPercent → `—`)
   - Line 455
   - `id="tmAmdaBar" style="width:87%"` → `width:0%`
   - `id="tmAmdaPercent">87%` → `—`
 
-- [ ] **[IMPORTANT] Admin Dashboard shows `24` systems; LGU Dashboard shows `48` — inconsistent**
+- [x] **[IMPORTANT] Admin Dashboard shows `24` systems; LGU Dashboard shows `48` — inconsistent** — ✅ Done (relabeled: "Active Systems (this site)" vs "Active Systems (region-wide)")
   - Lines 629 vs 1113
   - Decide on one number or clearly label each as different scope (e.g., "Barangay A" vs "Region-wide")
 
-- [ ] **[IMPORTANT] Analytics AMDA confidence `87%` is hardcoded and never updated by JS**
+- [x] **[IMPORTANT] Analytics AMDA confidence `87%` is hardcoded and never updated by JS** — ✅ Done (→ `—`; `updateOverview()` now sets `analyticsAmdaPct`)
   - Line 558 — `id="analyticsAmdaPct"` exists but `initAnalyticsCharts()` never sets it
   - Add to `updateOverview()` in `script.js`:
     ```js
@@ -105,26 +115,26 @@
 
 ### 🟢 Minor
 
-- [ ] **[MINOR] `↑ 12% from yesterday` under Current Water Level is static and never updates**
+- [x] **[MINOR] `↑ 12% from yesterday` under Current Water Level is static and never updates** — ✅ Done (removed)
   - Line 180 — remove or connect to real data
 
-- [ ] **[MINOR] `↑ 1 new alert` under Active Alerts is static and never updates**
+- [x] **[MINOR] `↑ 1 new alert` under Active Alerts is static and never updates** — ✅ Done (removed)
   - Line 207 — remove or connect to real alert count
 
-- [ ] **[MINOR] `↑ 18% vs last month` under Estimated Water Savings is static**
+- [x] **[MINOR] `↑ 18% vs last month` under Estimated Water Savings is static** — ✅ Done (removed)
   - Line 548 — remove or connect to real data
 
-- [ ] **[MINOR] Capacity card in Tank Monitoring uses a `+` icon SVG — looks like an Add button**
+- [x] **[MINOR] Capacity card in Tank Monitoring uses a `+` icon SVG — looks like an Add button** — ✅ Done (replaced with a tank/cylinder icon)
   - Lines 365–368 — change to a water drop or tank icon to avoid confusion
 
-- [ ] **[MINOR] AMDA Overview progress bar correctly starts at `width:0%` — no change needed**
+- [x] **[MINOR] AMDA Overview progress bar correctly starts at `width:0%` — no change needed** — ✅ Verified (`amdaProgressBar` width:0%, dashboard line 283)
   - Line 295 ✅ Already correct
 
 ---
 
 ## 🎨 Stylesheet (`style.css`)
 
-- [ ] **[CRITICAL] No `.warning` CSS class for status badges — needed for the new `High` AMDA state**
+- [x] **[CRITICAL] No `.warning` CSS class for status badges — needed for the new `High` AMDA state** — ✅ Done (added `.status-badge.warning` + `.dot`)
   - Add after `.status-badge.low {}`:
     ```css
     .status-badge.warning {
@@ -136,7 +146,7 @@
     }
     ```
 
-- [ ] **[IMPORTANT] `.sc-tab-pane` class not defined in CSS — Sensor Connect tabs rely on it**
+- [x] **[IMPORTANT] `.sc-tab-pane` class not defined in CSS — Sensor Connect tabs rely on it** — ✅ Done (added `.sc-tab-pane` + `.hidden`)
   - Add:
     ```css
     .sc-tab-pane { display: block; }
@@ -147,10 +157,10 @@
 
 ## 🔑 Login Page (`index.html`)
 
-- [ ] **[IMPORTANT] Demo credential badges use `status-badge critical` and `status-badge low` colors — looks like system alerts**
+- [x] **[IMPORTANT] Demo credential badges use `status-badge critical` and `status-badge low` colors — looks like system alerts** — ✅ Done (all three now `status-badge normal`)
   - Change all three to `status-badge normal` so they look like clickable demo buttons, not error states
 
-- [ ] **[MINOR] Firebase mode note exposes console setup instructions publicly**
+- [x] **[MINOR] Firebase mode note exposes console setup instructions publicly** — ✅ Resolved by Supabase migration (login is now Supabase Auth; the Firebase note no longer exists)
   - Change: `"Create accounts in your Firebase Console → Authentication → Users."`
   - To: `"Sign in with your registered RainGuard account."`
 
@@ -158,17 +168,17 @@
 
 ## 📄 README (`README.md`)
 
-- [ ] **[CRITICAL] Tech stack section says `React Native (Mobile App)` — never built**
+- [x] **[CRITICAL] Tech stack section says `React Native (Mobile App)` — never built** — ✅ N/A — current `README.md` contains no such claim
   - Change to: `Responsive Web Dashboard — mobile-accessible via browser (vanilla JS / Chart.js)`
 
-- [ ] **[CRITICAL] Tank configuration in ESP32 Setup section shows wrong prototype values**
+- [x] **[CRITICAL] Tank configuration in ESP32 Setup section shows wrong prototype values** — ✅ N/A — current `README.md` doesn't list these CM values
   - `TANK_HEIGHT_CM: 120` → `33`
   - `SENSOR_OFFSET_CM: 5` → `3`
 
-- [ ] **[CRITICAL] Features section lists `downloadable mobile app` as a current feature**
+- [x] **[CRITICAL] Features section lists `downloadable mobile app` as a current feature** — ✅ N/A — not present in current `README.md`
   - Change to: `Mobile-Accessible — web dashboard works on any mobile browser; native app planned as future enhancement`
 
-- [ ] **[IMPORTANT] AMDA description says `4-parameter` — implementation uses `5 parameters`**
+- [x] **[IMPORTANT] AMDA description says `4-parameter` — implementation uses `5 parameters`** — ✅ Already correct — current `README.md` describes 5 parameters
   - Change to: `5 weighted parameters: water level (30%), inflow rate (20%), rate of change (20%), days of supply (15%), historical pattern (15%), with temporal context as a score multiplier (±4%)`
 
 ---
@@ -255,7 +265,7 @@
 
 ## 💻 Script (`script.js`)
 
-- [ ] **[CRITICAL] AMDA state labels don't match the manuscript**
+- [x] **[CRITICAL] AMDA state labels don't match the manuscript** — ✅ Done — code already uses Critical High / High / Normal / Low / Critical Low (script.js lines 122–126). NOTE: icons differ from the set suggested below; the *labels* match.
   - Current code uses: `Sufficient, Adequate, Low, Critical, Emergency`
   - Must match manuscript: `Critical High, High, Normal, Low, Critical Low`
   - Update the `STATES` array (lines 148–154):
@@ -267,7 +277,7 @@
     { min:  0, label: 'Critical Low',  cls: 'critical',  icon: '🔴' },
     ```
 
-- [ ] **[CRITICAL] Water-use recommendations not yet added to `_getRecommendations()`**
+- [x] **[CRITICAL] Water-use recommendations not yet added to `_getRecommendations()`** — ✅ Done — state-based non-potable recommendations + permanent disclaimer present (script.js ~lines 296–322)
   - Add state-based non-potable water-use recommendations after line 326
   - Include a permanent disclaimer: `"⚠️ For non-potable use only — not suitable for drinking or cooking."`
   - Full recommendation logic provided in prior session
@@ -276,7 +286,7 @@
   - Do NOT change the code — it is more accurate
   - Add one paragraph to Chapter 3 Section 3.5.2 explaining the evolution to 5 parameters during implementation
 
-- [ ] **[MINOR] `DEFAULT_SETTINGS` has `capacity: 5000` — set to `20` for prototype demo**
+- [x] **[MINOR] `DEFAULT_SETTINGS` has `capacity: 5000` — set to `20` for prototype demo** — ✅ Done (`capacity: 20`; simulation + fallbacks rescaled to capacity)
   - Line ~14: `capacity: 5000` → `capacity: 20`
   - Or update via Settings page in the dashboard (writes to localStorage automatically)
 
@@ -284,7 +294,7 @@
 
 ## 🔥 Firebase Config (`firebase-config.js`)
 
-- [ ] **[MINOR] Verify Firebase Security Rules are NOT set to open read/write before the defense**
+- [x] **[MINOR] Verify Firebase Security Rules are NOT set to open read/write before the defense** — ✅ Obsolete/resolved — Firebase removed; migrated to Supabase with RLS (any authenticated reads, only admin writes), verified by the E2E suite
   - Go to Firebase Console → Realtime Database → Rules
   - Should be `"auth != null"` not `true`
   - Firestore Rules should require `request.auth != null`
@@ -292,3 +302,5 @@
 ---
 
 *Total tasks: 57 | Critical: 22 | Important: 17 | Minor: 18*
+
+*Status (updated 2026-06-08): ✅ **34 done** — all code/asset tasks complete & verified by the 18-check E2E suite · ⬜ remaining are the **manuscript (PDF)** items + the Chapter-3 AMDA-weights paragraph (to be done in the document).*

@@ -850,6 +850,18 @@ textarea {
   background: var(--status-critical);
 }
 
+.status-badge.warning {
+  background: rgba(255, 152, 0, 0.15);
+  color: #E65100;
+}
+.status-badge.warning .dot {
+  background: #FF9800;
+}
+
+/* Sensor Connect tab panes */
+.sc-tab-pane { display: block; }
+.sc-tab-pane.hidden { display: none; }
+
 .status-badge.overflow {
   background: var(--status-overflow-bg);
   color: var(--status-overflow);
