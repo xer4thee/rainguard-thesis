@@ -7,7 +7,7 @@
 
 | Requirement | Details |
 |---|---|
-| **Python** | Version 3.x (to run local web server) |
+| **Python _or_ Node.js** | To run a local web server — Python 3.x (`python -m http.server`) **or** Node 18+ (`node tests/serve.mjs`) |
 | **Browser** | Google Chrome or Microsoft Edge 89+ (required for sensor connection) |
 | **Internet** | Needed for Supabase (login, database, realtime) and the weather forecast (Open-Meteo API) |
 | **ESP32 + Sensors** | Optional — for live hardware data (see Hardware section below) |
@@ -15,23 +15,39 @@
 
 ---
 
-## Backend Setup (Supabase) — one time
+## Installation & Backend Setup (one-time)
 
-The app uses Supabase (PostgreSQL + Auth + Realtime) as its backend.
+The app is **static** (HTML/CSS/JS, no build step) backed by **Supabase** (PostgreSQL + Auth + Realtime).
 
-1. **Apply the schema:** run `supabase/migrations/0001_init.sql` in your Supabase project
-   (dashboard → SQL Editor, or via the Supabase CLI/MCP). It creates the `profiles`,
-   `sensor_readings`, and `current_status` tables with RLS and realtime.
-2. **Create the demo users** (dashboard → Authentication → Add user, *Auto Confirm*):
-   `admin@rainguard.io` / `admin123`, `user@rainguard.io` / `user123`,
-   `lgu@rainguard.io` / `lgu123`. Then set their roles:
-   ```sql
-   update public.profiles set role='admin', username='admin' where email='admin@rainguard.io';
-   update public.profiles set role='user',  username='user'  where email='user@rainguard.io';
-   update public.profiles set role='lgu',   username='lgu'   where email='lgu@rainguard.io';
-   ```
-3. **Add your anon key:** copy it from Project Settings → API → `anon` `public`, and
-   replace `__SUPABASE_ANON_KEY__` in both `index.html` and `dashboard.html`.
+### 1. Get the project
+```
+git clone https://github.com/xer4thee/rainguard-thesis.git
+cd rainguard-thesis
+```
+*(or download the ZIP from GitHub and extract it)*
+
+### 2. Apply the database migrations
+In your Supabase project (dashboard → **SQL Editor**, or the Supabase CLI/MCP), run **in order**:
+- `supabase/migrations/0001_init.sql` — `profiles`, `sensor_readings`, `current_status` (+ RLS, realtime, signup trigger)
+- `supabase/migrations/0002_alerts.sql` — `alerts` table (+ RLS, realtime)
+
+### 3. Create the demo users
+Dashboard → **Authentication → Add user** (tick **Auto Confirm User**):
+`admin@rainguard.io` / `admin123`, `user@rainguard.io` / `user123`, `lgu@rainguard.io` / `lgu123`.
+Then set their roles:
+```sql
+update public.profiles set role='admin', username='admin' where email='admin@rainguard.io';
+update public.profiles set role='user',  username='user'  where email='user@rainguard.io';
+update public.profiles set role='lgu',   username='lgu'   where email='lgu@rainguard.io';
+```
+
+### 4. Supabase connection (anon key)
+The project URL + anon key are **already configured** in `index.html`, `login.html`, `register.html`,
+`reset.html`, and `dashboard.html`. To point at a **different** Supabase project, update the
+`createClient(<url>, <anon-key>)` call in those files (anon key from Project Settings → API → `anon` `public`).
+
+> New users can also self-register at `register.html`; registration follows your Supabase
+> **Auth → Confirm email** setting (turn it off for instant demo sign-up).
 
 ---
 
@@ -115,17 +131,33 @@ Keyboard interrupt received, exiting.
 
 ---
 
+## Developer Setup (optional — run the tests)
+
+No build step is needed to **run** the app. To run the automated end-to-end suite:
+
+```
+npm install                       # installs Playwright (uses your system Chrome/Edge)
+set SUPABASE_PAT=sbp_xxxxx        # Windows; a Supabase Personal Access Token (for realtime/data checks)
+npm run test:e2e                  # self-hosts a server + headless browser → 35 checks
+```
+
+> `npm run test:e2e` starts its **own** server, so don't run a separate server at the same time.
+> Without `SUPABASE_PAT`, the auth/UI checks still pass; the realtime + seed-dependent checks fail.
+> `npm run serve` (http://localhost:8123) is just an alternative to Python for running the app normally.
+
+---
+
 ## Features Overview
 
 | Page | Who Can Access | What It Does |
 |---|---|---|
 | **Overview** | All | Live tank level, AMDA score, recommendations |
 | **Tank Monitoring** | All | Real-time level chart, inflow/outflow, AMDA analysis |
-| **Alerts** | All | Alert history (persisted), notification preferences, push test |
+| **Alerts** | All | Live alert history from Supabase (realtime), notification preferences, push test |
 | **Analytics** | All | Usage charts, weekly/monthly trends |
 | **Settings** | All | Tank capacity, threshold levels |
 | **Admin Dashboard** | Admin | System overview stats |
-| **User Management** | Admin | Add/edit/disable user accounts |
+| **User Management** | Admin | Real Supabase users — promote roles (user/admin/lgu), enable/disable |
 | **Device Management** | Admin | Sensor device list — status auto-updates when ESP32 connects |
 | **AMDA Configuration** | Admin | Forecast horizon, alert sensitivity, weather toggle |
 | **Sensor Connect** | Admin | ESP32 hardware wiring guide + live serial connection |
@@ -164,10 +196,10 @@ Each state produces **specific actionable recommendations** shown on the dashboa
 ## Alerts & Notifications
 
 ### In-App Alerts
-- Generated automatically by AMDA when score drops below the configured threshold
-- Stored in browser `localStorage` — **survive page refresh**
+- Generated automatically by AMDA when the score/state crosses the configured thresholds
+- **Stored in Supabase** (`alerts` table) and shared across devices — they update **live** via realtime
 - Visible under **Alerts → Alert History**
-- Can be cleared with the **"🗑 Clear History"** button
+- An **admin** can clear them with the **"🗑 Clear History"** button (RLS-enforced)
 
 ### Push Notifications (Browser)
 1. Go to **Alerts → Notification Preferences**
@@ -242,7 +274,8 @@ RainGuard/
 ├── esp32_sketch.ino           ← Arduino firmware for ESP32 + sensors
 ├── supabase/
 │   └── migrations/
-│       └── 0001_init.sql      ← Postgres schema, RLS, realtime
+│       ├── 0001_init.sql      ← Postgres schema (profiles, readings, status), RLS, realtime
+│       └── 0002_alerts.sql    ← alerts table, RLS, realtime
 ├── tests/                     ← Playwright E2E suite + static server
 ├── docs/superpowers/          ← Design spec + implementation plan
 └── README.md                  ← This guide
