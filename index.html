@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self';">
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' https://esm.sh; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self' https://zhfehohjkafrcwwqexdy.supabase.co wss://zhfehohjkafrcwwqexdy.supabase.co;">
   <title>RainGuard — Login</title>
   <meta name="description" content="RainGuard rainwater tank monitoring system. Log in to access your dashboard.">
   <link rel="stylesheet" href="style.css">
@@ -25,8 +25,8 @@
         <div id="loginError" class="login-error"></div>
 
         <div class="form-group">
-          <label for="username">Username</label>
-          <input type="text" id="username" placeholder="Enter your username" required maxlength="32" autocomplete="username">
+          <label for="username">Email</label>
+          <input type="email" id="username" placeholder="Enter your email" required maxlength="64" autocomplete="email">
         </div>
 
         <div class="form-group">
@@ -51,18 +51,24 @@
         <p style="font-size:.78rem;color:var(--text-muted);margin-bottom:.5rem;">Demo Credentials</p>
         <div style="display:flex;gap:.5rem;justify-content:center;flex-wrap:wrap;">
           <span class="status-badge normal" style="cursor:pointer;"
-            onclick="document.getElementById('username').value='user';document.getElementById('password').value='user123';">user / user123</span>
+            onclick="document.getElementById('username').value='user@rainguard.io';document.getElementById('password').value='user123';">user</span>
           <span class="status-badge critical" style="cursor:pointer;"
-            onclick="document.getElementById('username').value='admin';document.getElementById('password').value='admin123';">admin / admin123</span>
+            onclick="document.getElementById('username').value='admin@rainguard.io';document.getElementById('password').value='admin123';">admin</span>
           <span class="status-badge low" style="cursor:pointer;"
-            onclick="document.getElementById('username').value='lgu';document.getElementById('password').value='lgu123';">lgu / lgu123</span>
+            onclick="document.getElementById('username').value='lgu@rainguard.io';document.getElementById('password').value='lgu123';">lgu</span>
         </div>
       </div>
     </div>
   </div>
 
-  <script>
-    'use strict';
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const supabase = createClient(
+      'https://zhfehohjkafrcwwqexdy.supabase.co',
+      '__SUPABASE_ANON_KEY__'   // replace with the anon (publishable) key
+    );
+    window._supabase = supabase;
 
     /* ─────────────────────────────────────────
        RATE LIMITER  (session-scoped)
@@ -92,10 +98,6 @@
       }
     };
 
-    /* Redirect if already logged in */
-    if (sessionStorage.getItem('rg_role')) window.location.href = 'dashboard.html';
-
-    const CREDENTIALS = { admin: 'admin123', user: 'user123', lgu: 'lgu123' };
     const errEl = document.getElementById('loginError');
     const btn   = document.getElementById('loginBtn');
     let timer   = null;
@@ -109,31 +111,32 @@
           clearInterval(timer); timer = null;
           btn.disabled = false; errEl.textContent = '';
         } else {
-          /* textContent only — no HTML injection risk */
           errEl.textContent = 'Too many failed attempts. Try again in ' + s + 's.';
         }
       }, 500);
     }
 
+    /* Redirect if already logged in */
+    const { data: { session: existingSession } } = await supabase.auth.getSession();
+    if (existingSession) window.location.href = 'dashboard.html';
+
     const existingLock = RateLimiter.locked();
     if (existingLock) startCountdown(existingLock);
 
-    document.getElementById('loginForm').addEventListener('submit', function(e) {
+    document.getElementById('loginForm').addEventListener('submit', async function (e) {
       e.preventDefault();
       const lockUntil = RateLimiter.locked();
       if (lockUntil) { startCountdown(lockUntil); return; }
 
-      /* Clamp length; compare only — never written as HTML */
-      const rawUser = document.getElementById('username').value.trim().toLowerCase().slice(0, 32);
-      const rawPass = document.getElementById('password').value.slice(0, 64);
+      const email = document.getElementById('username').value.trim().toLowerCase().slice(0, 64);
+      const pass  = document.getElementById('password').value.slice(0, 64);
 
-      if (!rawUser || !rawPass) {
-        errEl.textContent = 'Please enter both username and password.'; return;
+      if (!email || !pass) {
+        errEl.textContent = 'Please enter both email and password.'; return;
       }
 
-      if (CREDENTIALS[rawUser] && CREDENTIALS[rawUser] === rawPass) {
-        sessionStorage.setItem('rg_role', rawUser === 'admin' ? 'admin' : rawUser === 'lgu' ? 'lgu' : 'user');
-        sessionStorage.setItem('rg_user', rawUser);
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password: pass });
+      if (!error && data.session) {
         window.location.href = 'dashboard.html';
       } else {
         RateLimiter.record();
@@ -143,7 +146,7 @@
           startCountdown(lock);
         } else {
           const left = RateLimiter.left();
-          errEl.textContent = 'Invalid username or password. ' + left + ' attempt' + (left !== 1 ? 's' : '') + ' remaining.';
+          errEl.textContent = 'Invalid email or password. ' + left + ' attempt' + (left !== 1 ? 's' : '') + ' remaining.';
         }
       }
     });

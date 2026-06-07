@@ -115,7 +115,7 @@ const RainGuard = (function () {
      *   P4 Days of Supply     15%  — how long until depletion at current net rate
      *   P5 Historical Pattern 15%  — deviation from the rolling average baseline
      */
-    WEIGHTS: { level: 0.30, inflow: 0.20, rateOfChange: 0.20 },
+    WEIGHTS: { level: 0.30, inflow: 0.20, rateOfChange: 0.20, daysSupply: 0.15, historical: 0.15 },
 
     /* 5-state output thresholds */
     STATES: [
@@ -358,50 +358,65 @@ if (recs.length === 1) { // only disclaimer was added
       /* Sync waterLevel state so existing functions still work */
      state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
 
-      /* Write to Firebase */
-      this._writeToFirebase();
+      /* Write to Supabase */
+      this._writeToSupabase();
     },
 
-    _writeToFirebase() {
-      if (!window._firebaseDB) return;
+    async _writeToSupabase() {
+      const sb = window._supabase;
+      if (!sb) return;
       try {
-        const db  = window._firebaseDB;
-        const ref = window._firebaseRef;
-        const set = window._firebaseSet;
-        const ts  = Date.now();
         const amda = this.runAmda();
-
-        set(ref(db, 'sensor_readings/' + ts), {
-          level_percent:  this.latest.levelPct,
-          inflow_lph:     this.latest.inflowLPH,
-          outflow_lph:    this.latest.outflowLPH,
-          temp_c:         this.latest.tempC,
-          timestamp:      ts,
+        const { error: e1 } = await sb.from('sensor_readings').insert({
+          level_percent: this.latest.levelPct,
+          inflow_lph:    this.latest.inflowLPH,
+          outflow_lph:   this.latest.outflowLPH,
+          temp_c:        this.latest.tempC,
         });
-
-        set(ref(db, 'monitored_state'), {
-          amda_score:     amda.score,
-          amda_state:     amda.state.label,
-          recommendation: amda.recommendations[0]?.text || '',
-          days_remaining: amda.daysRemaining,
-          trend:          amda.predictions.trend,
-          last_updated:   ts,
-        });
-
-        set(ref(db, 'computed_values'), {
+        const { error: e2 } = await sb.from('current_status').upsert({
+          id: 1,
+          amda_score:          amda.score,
+          amda_state:          amda.state.label,
+          recommendation:      amda.recommendations[0]?.text || '',
+          days_remaining:      amda.daysRemaining,
+          trend:               amda.predictions.trend,
           time_to_overflow_hr: amda.predictions.timeToOverflowH,
           time_to_deplete_hr:  amda.predictions.timeToDepleteH,
-          days_remaining:      amda.daysRemaining,
-          last_updated:        ts,
+          updated_at:          new Date().toISOString(),
         });
-
-        console.log('Firebase synced — level: '
-          + this.latest.levelPct + '% AMDA: '
-          + amda.score + ' ' + amda.state.label);
-
+        if (e1 || e2) console.warn('Supabase write failed:', (e1 || e2).message);
+        else console.log('Supabase synced — level:', this.latest.levelPct + '%', 'AMDA:', amda.score);
       } catch (err) {
-        console.warn('Firebase write failed:', err.message);
+        console.warn('Supabase write error:', err.message);
       }
+    },
+
+    /** Live read-back: subscribe to current_status so any logged-in device
+     *  reflects live data even without a local serial feed. */
+    subscribeRemote() {
+      const sb = window._supabase;
+      if (!sb) return;
+      /* seed once so a fresh page isn't blank */
+      sb.from('current_status').select('*').eq('id', 1).single()
+        .then(({ data }) => { if (data) this._applyRemote(data); });
+      sb.channel('rg-status')
+        .on('postgres_changes',
+            { event: '*', schema: 'public', table: 'current_status' },
+            payload => this._applyRemote(payload.new))
+        .subscribe();
+    },
+
+    _applyRemote(row) {
+      /* Remote data drives the UI only when THIS browser has no live serial feed. */
+      if (this.live || !row) return;
+      if (typeof row.amda_score === 'number') {
+        const el = document.getElementById('statAMDA');
+        if (el) el.textContent = row.amda_score + '% — ' + (row.amda_state || '');
+        const bar = document.getElementById('amdaProgressBar');
+        if (bar) bar.style.width = row.amda_score + '%';
+      }
+      const upd = document.getElementById('tankLastUpdated');
+      if (upd && row.updated_at) upd.textContent = '🛰 Remote — ' + new Date(row.updated_at).toLocaleTimeString();
     },
 
     /** Tick the simulation one step (used when live === false) */
@@ -602,15 +617,19 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      AUTH
      ────────────────────────────────────────── */
-  function checkAuth() {
-    state.role = sessionStorage.getItem('rg_role');
-    state.user = sessionStorage.getItem('rg_user');
-    if (!state.role) { window.location.href = 'index.html'; return false; }
+  async function checkAuth() {
+    const sb = window._supabase;
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) { window.location.href = 'index.html'; return false; }
+    const { data: profile } = await sb
+      .from('profiles').select('username, role').eq('id', session.user.id).single();
+    state.role = profile?.role || 'user';
+    state.user = profile?.username || session.user.email;
     return true;
   }
 
-  function logout() {
-    sessionStorage.clear();
+  async function logout() {
+    await window._supabase.auth.signOut();
     window.location.href = 'index.html';
   }
 
@@ -1699,8 +1718,8 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      INIT
      ────────────────────────────────────────── */
-  function init() {
-    if (!checkAuth()) return;
+  async function init() {
+    if (!(await checkAuth())) return;
 
     state.settings = loadFromStorage('settings', DEFAULT_SETTINGS);
     state.waterLevel = 3400;
@@ -1708,6 +1727,9 @@ if (recs.length === 1) { // only disclaimer was added
     setupUI();
     handleRoute();
     window.addEventListener('hashchange', handleRoute);
+
+    /* Live read-back from Supabase Realtime (used when no local serial feed) */
+    SensorHub.subscribeRemote();
 
     /* Fetch weather forecast using browser Geolocation if available,
        falling back to Metro Manila, Philippines (14.5995°N, 120.9842°E) */
