@@ -115,7 +115,7 @@ const RainGuard = (function () {
      *   P4 Days of Supply     15%  — how long until depletion at current net rate
      *   P5 Historical Pattern 15%  — deviation from the rolling average baseline
      */
-    WEIGHTS: { level: 0.30, inflow: 0.20, rateOfChange: 0.20 },
+    WEIGHTS: { level: 0.30, inflow: 0.20, rateOfChange: 0.20, daysSupply: 0.15, historical: 0.15 },
 
     /* 5-state output thresholds */
     STATES: [
@@ -358,50 +358,91 @@ if (recs.length === 1) { // only disclaimer was added
       /* Sync waterLevel state so existing functions still work */
      state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
 
-      /* Write to Firebase */
-      this._writeToFirebase();
+      /* Write to Supabase */
+      this._writeToSupabase();
     },
 
-    _writeToFirebase() {
-      if (!window._firebaseDB) return;
+    async _writeToSupabase() {
+      const sb = window._supabase;
+      if (!sb) return;
       try {
-        const db  = window._firebaseDB;
-        const ref = window._firebaseRef;
-        const set = window._firebaseSet;
-        const ts  = Date.now();
         const amda = this.runAmda();
-
-        set(ref(db, 'sensor_readings/' + ts), {
-          level_percent:  this.latest.levelPct,
-          inflow_lph:     this.latest.inflowLPH,
-          outflow_lph:    this.latest.outflowLPH,
-          temp_c:         this.latest.tempC,
-          timestamp:      ts,
+        const { error: e1 } = await sb.from('sensor_readings').insert({
+          level_percent: this.latest.levelPct,
+          inflow_lph:    this.latest.inflowLPH,
+          outflow_lph:   this.latest.outflowLPH,
+          temp_c:        this.latest.tempC,
         });
-
-        set(ref(db, 'monitored_state'), {
-          amda_score:     amda.score,
-          amda_state:     amda.state.label,
-          recommendation: amda.recommendations[0]?.text || '',
-          days_remaining: amda.daysRemaining,
-          trend:          amda.predictions.trend,
-          last_updated:   ts,
-        });
-
-        set(ref(db, 'computed_values'), {
+        const { error: e2 } = await sb.from('current_status').upsert({
+          id: 1,
+          amda_score:          amda.score,
+          amda_state:          amda.state.label,
+          recommendation:      amda.recommendations[0]?.text || '',
+          days_remaining:      amda.daysRemaining,
+          trend:               amda.predictions.trend,
           time_to_overflow_hr: amda.predictions.timeToOverflowH,
           time_to_deplete_hr:  amda.predictions.timeToDepleteH,
-          days_remaining:      amda.daysRemaining,
-          last_updated:        ts,
+          updated_at:          new Date().toISOString(),
         });
-
-        console.log('Firebase synced — level: '
-          + this.latest.levelPct + '% AMDA: '
-          + amda.score + ' ' + amda.state.label);
-
+        if (e1 || e2) console.warn('Supabase write failed:', (e1 || e2).message);
+        else console.log('Supabase synced — level:', this.latest.levelPct + '%', 'AMDA:', amda.score);
       } catch (err) {
-        console.warn('Firebase write failed:', err.message);
+        console.warn('Supabase write error:', err.message);
       }
+    },
+
+    /* Remote read-back state — when fresh, the dashboard renders live Supabase
+       data instead of the local simulation. */
+    remoteActive: false,
+    remoteTs: 0,
+    remoteStatus: null,
+    REMOTE_STALE_MS: 30000,
+    isRemoteFresh() { return this.remoteActive && (Date.now() - this.remoteTs) < this.REMOTE_STALE_MS; },
+
+    /** Live read-back: subscribe to sensor_readings (raw values) and current_status
+     *  (AMDA summary) so any logged-in device reflects live data without a serial feed. */
+    subscribeRemote() {
+      const sb = window._supabase;
+      if (!sb) return;
+      /* seed once so a fresh page isn't blank */
+      sb.from('sensor_readings').select('*').order('recorded_at', { ascending: false }).limit(1)
+        .then(({ data }) => { if (data && data[0]) this._applyRemoteReading(data[0]); });
+      sb.from('current_status').select('*').eq('id', 1).single()
+        .then(({ data }) => { if (data) this._applyRemoteStatus(data); });
+
+      sb.channel('rg-readings')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'sensor_readings' },
+            payload => this._applyRemoteReading(payload.new))
+        .subscribe();
+      sb.channel('rg-status')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'current_status' },
+            payload => this._applyRemoteStatus(payload.new))
+        .subscribe();
+    },
+
+    /* Populate latest sensor values from a remote reading (local serial always wins). */
+    _applyRemoteReading(row) {
+      if (this.live || !row) return;
+      if (typeof row.level_percent === 'number') this.latest.levelPct   = row.level_percent;
+      if (typeof row.inflow_lph    === 'number') this.latest.inflowLPH  = row.inflow_lph;
+      if (typeof row.outflow_lph   === 'number') this.latest.outflowLPH = row.outflow_lph;
+      if (typeof row.temp_c        === 'number') this.latest.tempC      = row.temp_c;
+      this.latest.ts    = Date.now();
+      this.remoteActive = true;
+      this.remoteTs     = Date.now();
+      this._history.push({ ...this.latest, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+      if (this._history.length > this.MAX_HISTORY) this._history.shift();
+      state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
+    },
+
+    /* Store remote AMDA summary + flag freshness for the "Remote" indicator. */
+    _applyRemoteStatus(row) {
+      if (this.live || !row) return;
+      this.remoteStatus = row;
+      this.remoteActive = true;
+      this.remoteTs     = Date.now();
+      const upd = document.getElementById('tankLastUpdated');
+      if (upd && row.updated_at) upd.textContent = '🛰 Remote — ' + new Date(row.updated_at).toLocaleTimeString();
     },
 
     /** Tick the simulation one step (used when live === false) */
@@ -602,15 +643,19 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      AUTH
      ────────────────────────────────────────── */
-  function checkAuth() {
-    state.role = sessionStorage.getItem('rg_role');
-    state.user = sessionStorage.getItem('rg_user');
-    if (!state.role) { window.location.href = 'index.html'; return false; }
+  async function checkAuth() {
+    const sb = window._supabase;
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) { window.location.href = 'index.html'; return false; }
+    const { data: profile } = await sb
+      .from('profiles').select('username, role').eq('id', session.user.id).single();
+    state.role = profile?.role || 'user';
+    state.user = profile?.username || session.user.email;
     return true;
   }
 
-  function logout() {
-    sessionStorage.clear();
+  async function logout() {
+    await window._supabase.auth.signOut();
     window.location.href = 'index.html';
   }
 
@@ -800,7 +845,7 @@ if (recs.length === 1) { // only disclaimer was added
      OVERVIEW DASHBOARD
      ────────────────────────────────────────── */
   function updateOverview() {
-    if (!SensorHub.live) SensorHub.simulate();
+    if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
     const cap    = state.settings.capacity || 5000;
     const pct    = SensorHub.latest.levelPct;
     const status = getStatus(pct);
@@ -814,7 +859,7 @@ if (recs.length === 1) { // only disclaimer was added
     $('#tankWater').style.height  = pct + '%';
     $('#tankPercent').textContent = pct + '%';
     $('#tankCapacity').textContent = fmt(cap) + ' L';
-    $('#tankLastUpdated').textContent = (SensorHub.live ? '🟢 Live — ' : '⚙ Simulated — ') + new Date().toLocaleTimeString();
+    $('#tankLastUpdated').textContent = (SensorHub.live ? '🟢 Live — ' : SensorHub.isRemoteFresh() ? '🛰 Remote — ' : '⚙ Simulated — ') + new Date().toLocaleTimeString();
 
     $('#tankInflow').textContent  = SensorHub.latest.inflowLPH.toFixed(1)  + ' L/hr';
     $('#tankOutflow').textContent = SensorHub.latest.outflowLPH.toFixed(1) + ' L/hr';
@@ -912,8 +957,8 @@ if (recs.length === 1) { // only disclaimer was added
        Does NOT touch the daily/weekly charts. */
     const iv = setInterval(() => {
       if (state.currentPage === 'overview') {
-        /* Tick simulation ONLY if no real hardware is connected */
-        if (!SensorHub.live) SensorHub.simulate();
+        /* Tick simulation ONLY if no real hardware AND no fresh remote data */
+        if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
         updateOverview();
         /* Daily chart: only append a new point when live hardware sends data */
         if (SensorHub.live && state.charts.dailyUsage) {
@@ -980,8 +1025,8 @@ if (recs.length === 1) { // only disclaimer was added
     const iv = setInterval(() => {
       if (state.currentPage !== 'tank') return;
 
-      /* Tick simulation only when no real hardware connected */
-      if (!SensorHub.live) SensorHub.simulate();
+      /* Tick simulation only when no real hardware AND no fresh remote data */
+      if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
 
       const cap    = state.settings.capacity || 5000;
       const pct    = SensorHub.latest.levelPct;
@@ -993,7 +1038,7 @@ if (recs.length === 1) { // only disclaimer was added
 
       /* ── Simulation mode indicator ── */
       const modeEl = $('#tmSimMode');
-      if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : '⚡ Simulation Mode';
+      if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : SensorHub.isRemoteFresh() ? '🛰 Remote (Supabase)' : '⚡ Simulation Mode';
 
       $('#tmWaterLevel').textContent = fmt(state.waterLevel) + ' L';
       $('#tmCapacity').textContent   = fmt(cap) + ' L';
@@ -1699,8 +1744,8 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      INIT
      ────────────────────────────────────────── */
-  function init() {
-    if (!checkAuth()) return;
+  async function init() {
+    if (!(await checkAuth())) return;
 
     state.settings = loadFromStorage('settings', DEFAULT_SETTINGS);
     state.waterLevel = 3400;
@@ -1708,6 +1753,9 @@ if (recs.length === 1) { // only disclaimer was added
     setupUI();
     handleRoute();
     window.addEventListener('hashchange', handleRoute);
+
+    /* Live read-back from Supabase Realtime (used when no local serial feed) */
+    SensorHub.subscribeRemote();
 
     /* Fetch weather forecast using browser Geolocation if available,
        falling back to Metro Manila, Philippines (14.5995°N, 120.9842°E) */

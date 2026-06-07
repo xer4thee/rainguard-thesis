@@ -1251,26 +1251,15 @@
         </div>
     </div>
     <script type="module">
-      import { initializeApp } 
-        from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
-      import { getDatabase, ref, set } 
-        from "https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js";
+      import { createClient }
+        from "https://esm.sh/@supabase/supabase-js@2";
 
-      const firebaseConfig = {
-        apiKey: "AIzaSyDUl8OAB7qROUm7Zzh5n-d_Lx3Ey-V4Ll4",
-        authDomain: "rainguard-c2f9d.firebaseapp.com",
-        databaseURL: "https://rainguard-c2f9d-default-rtdb.asia-southeast1.firebasedatabase.app",
-        projectId: "rainguard-c2f9d",
-      };
+      window._supabase = createClient(
+        "https://zhfehohjkafrcwwqexdy.supabase.co",
+        "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU"
+      );
 
-      const app = initializeApp(firebaseConfig);
-      const db  = getDatabase(app);
-
-      window._firebaseDB  = db;
-      window._firebaseRef = ref;
-      window._firebaseSet = set;
-
-      console.log("Firebase ready");
+      console.log("Supabase ready");
     </script>
 
     <script src="script.js"></script>

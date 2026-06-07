@@ -9,8 +9,29 @@
 |---|---|
 | **Python** | Version 3.x (to run local web server) |
 | **Browser** | Google Chrome or Microsoft Edge 89+ (required for sensor connection) |
-| **Internet** | Needed for weather forecast feature (Open-Meteo API) |
+| **Internet** | Needed for Supabase (login, database, realtime) and the weather forecast (Open-Meteo API) |
 | **ESP32 + Sensors** | Optional — for live hardware data (see Hardware section below) |
+| **Supabase project** | Backend database + auth (project `zhfehohjkafrcwwqexdy`); anon key configured in the app (see Backend Setup) |
+
+---
+
+## Backend Setup (Supabase) — one time
+
+The app uses Supabase (PostgreSQL + Auth + Realtime) as its backend.
+
+1. **Apply the schema:** run `supabase/migrations/0001_init.sql` in your Supabase project
+   (dashboard → SQL Editor, or via the Supabase CLI/MCP). It creates the `profiles`,
+   `sensor_readings`, and `current_status` tables with RLS and realtime.
+2. **Create the demo users** (dashboard → Authentication → Add user, *Auto Confirm*):
+   `admin@rainguard.io` / `admin123`, `user@rainguard.io` / `user123`,
+   `lgu@rainguard.io` / `lgu123`. Then set their roles:
+   ```sql
+   update public.profiles set role='admin', username='admin' where email='admin@rainguard.io';
+   update public.profiles set role='user',  username='user'  where email='user@rainguard.io';
+   update public.profiles set role='lgu',   username='lgu'   where email='lgu@rainguard.io';
+   ```
+3. **Add your anon key:** copy it from Project Settings → API → `anon` `public`, and
+   replace `__SUPABASE_ANON_KEY__` in both `index.html` and `dashboard.html`.
 
 ---
 
@@ -65,11 +86,11 @@ You will see the **RainGuard login page**.
 
 Use one of the demo accounts below:
 
-| Username | Password | Role | Access |
+| Email | Password | Role | Access |
 |---|---|---|---|
-| `admin` | `admin123` | Administrator | Full access — all pages including Sensor Connect, AMDA Config, Device Management |
-| `user` | `user123` | Regular User | Overview, Tank Monitoring, Alerts, Analytics, Settings |
-| `lgu` | `lgu123` | LGU Official | LGU Dashboard, Alerts, Analytics |
+| `admin@rainguard.io` | `admin123` | Administrator | Full access — all pages including Sensor Connect, AMDA Config, Device Management |
+| `user@rainguard.io` | `user123` | Regular User | Overview, Tank Monitoring, Alerts, Analytics, Settings |
+| `lgu@rainguard.io` | `lgu123` | LGU Official | LGU Dashboard, Alerts, Analytics |
 
 > 💡 You can click the coloured credential badges on the login page to auto-fill.
 
@@ -207,13 +228,69 @@ Each state produces **specific actionable recommendations** shown on the dashboa
 
 ```
 RainGuard/
-├── index.html          ← Login page
-├── dashboard.html      ← Main application dashboard
-├── script.js           ← AMDA engine, SensorHub, SerialManager, all app logic
-├── style.css           ← Design system and styling
-├── esp32_sketch.ino    ← Arduino firmware for ESP32 + sensors
-└── README.md           ← This guide
+├── index.html                 ← Login page (Supabase Auth)
+├── dashboard.html             ← Main application dashboard
+├── script.js                  ← AMDA engine, SensorHub, SerialManager, Supabase client
+├── style.css                  ← Design system and styling
+├── esp32_sketch.ino           ← Arduino firmware for ESP32 + sensors
+├── supabase/
+│   └── migrations/
+│       └── 0001_init.sql      ← Postgres schema, RLS, realtime
+├── docs/superpowers/          ← Design spec + implementation plan
+└── README.md                  ← This guide
 ```
+
+---
+
+## 🛠 Known Issues & Development Tasks
+
+> **Audit date:** 2026-06-08 — from a full review of `script.js`, `dashboard.html`, `index.html`. The backend has since been **migrated from Firebase to Supabase** (Postgres + Auth + Realtime); items resolved by that migration are checked off below. Ordered by severity.
+
+### 🔴 Critical — breaks core functionality
+
+- [x] **Fix AMDA score evaluating to `NaN`** 🔌 — ✅ **Fixed 2026-06-08**
+  `AMDA.WEIGHTS` (`script.js:118`) defined only `level`, `inflow`, `rateOfChange` (sums to 0.70), but `compute()` (`script.js:188`) also multiplied by `W.daysSupply` and `W.historical` — keys that didn't exist. Result: `score` was `NaN`. The dashboard showed **"NaN%"**, and `STATES.find()` (NaN ≥ min is always false) silently fell back to "Critical Low" for every reading.
+  **Fix applied:** added `daysSupply: 0.15, historical: 0.15` to the `WEIGHTS` object — all five weights now sum to 1.0.
+
+- [x] **Fix silent Firebase write failures for `monitored_state` & `computed_values`** 🔌 — ✅ **Fixed 2026-06-08**
+  `_writeToFirebase()` sent `amda_score: NaN` and other NaN-derived fields; Firebase `set()` **throws** on `NaN`, and the error was swallowed by the `catch` (only `console.warn`). So with a real ESP32 connected, `sensor_readings` were written but the AMDA state and computed values **never reached the backend**.
+  **Fix applied:** root cause resolved by the weights fix above, **plus** a defensive `clean()` guard now coerces any non-finite number to `null` before every `set()` call, so a single bad value can never abort a write again.
+
+### 🟠 High — architecture & connection gaps
+
+- [x] **Dashboard now reads back live data** — ✅ **Resolved by Supabase migration**
+  The dashboard subscribes to `current_status` via Supabase Realtime (`SensorHub.subscribeRemote()`), so any authenticated device reflects live data — fixing the old write-only gap.
+
+- [x] **Database access is now authenticated (RLS)** — ✅ **Resolved by Supabase migration**
+  Replaced the publicly read/writable Firebase rules with Supabase Auth + RLS: any authenticated user reads; only `admin` writes (`supabase/migrations/0001_init.sql`).
+
+- [ ] **Backend only updates when an ESP32 is physically connected**
+  `SensorHub.simulate()` still never calls `_writeToSupabase()` (`script.js`). With no hardware the backend goes stale. Decide whether simulation should also publish (useful for demoing the remote dashboard).
+
+- [ ] **`sensor_readings` grows unbounded**
+  Every reading inserts a row into `public.sensor_readings` (~every 2 s) with no pruning — storage/query cost grows over time.
+  **Fix:** schedule periodic pruning/aggregation, or add a retention policy.
+
+### 🟡 Medium — logic & correctness
+
+- [ ] **AMDA state-change alerts never fire**
+  `checkAndFireAlert()` (`script.js:1052`) compares `badStates = ['Critical','Emergency']` against `amda.state.label`, but the actual labels are `Critical High / High / Normal / Low / Critical Low` (`script.js:121-127`). They never match, so AMDA-driven alerts are dead code — only tank-status alerts (Overflow/Critical) fire.
+
+- [ ] **AMDA states/labels don't match this README**
+  Code uses thresholds 90/70/30/20/0 with labels Critical High/High/Normal/Low/Critical Low (`script.js:121-127`); the README table uses 80/60/40/20/0 with Sufficient/Adequate/Low/Critical/Emergency. Icons are also inconsistent (✅ at 90, 🟠 "Normal", 🔴 "Low").
+  **Fix:** pick one scheme and align code + README + the alert logic above.
+
+### 🟢 Low — polish / known limitations
+
+- [ ] **Charts use hardcoded/random demo data** — daily/weekly/monthly/LGU/predictive charts and the CSV export are static placeholders, not yet driven by real `sensor_readings` history (intentionally out of scope for the migration).
+- [ ] **`dashboard.html` has no Content-Security-Policy** while `index.html` does. Not a functional bug, but a scoped CSP allowlisting esm.sh + the Supabase origins (https + wss) would harden it.
+- [x] **Auth is now server-backed** — ✅ **Resolved by Supabase migration:** real Supabase Auth (email+password) replaces the hardcoded client-side credentials; role comes from the `profiles` table.
+
+### ✅ Completed this session
+- [x] **Migrated backend: Firebase → Supabase** — Postgres schema + RLS + Realtime (`supabase/migrations/0001_init.sql`), Supabase Auth login, live read-back, and full Firebase removal. Design + plan in `docs/superpowers/`.
+- [x] **ESP32 ultrasonic glitch filtering** — median-of-5 sampling + range gating (`esp32_sketch.ino`).
+- [x] **ESP32 flow-meter diagnostics** — `DIAG_MODE` raw pulse output to isolate the dead outflow / intermittent inflow meters.
+- [x] **DS18B20 temperature read implemented** — replaces the hardcoded 28 °C with a real, auto-detected probe read (`esp32_sketch.ino`).
 
 ---
 
