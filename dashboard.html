@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RainGuard — Dashboard</title>
+    <meta name="description"
+        content="RainGuard dashboard — monitor your rainwater tank, view analytics, and manage settings.">
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💧</text></svg>">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+
+<body>
+    <!-- ========== APP LAYOUT ========== -->
+    <div class="app-layout" id="appLayout">
+
+        <!-- ===== NAVBAR ===== -->
+        <nav class="navbar">
+            <button class="hamburger" id="hamburgerBtn" aria-label="Toggle sidebar">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="3" y1="6" x2="21" y2="6" />
+                    <line x1="3" y1="12" x2="21" y2="12" />
+                    <line x1="3" y1="18" x2="21" y2="18" />
+                </svg>
+            </button>
+
+            <div class="navbar-brand">
+                <div class="brand-icon">
+                    <svg viewBox="0 0 24 24">
+                        <path
+                            d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z"
+                            fill="#fff" />
+                    </svg>
+                </div>
+                RainGuard
+            </div>
+
+            <ul class="navbar-links" id="navbarLinks">
+                <li><a href="#overview" data-nav="overview">Dashboard</a></li>
+                <li><a href="#alerts" data-nav="alerts">Alerts</a></li>
+                <li><a href="#analytics" data-nav="analytics">Analytics</a></li>
+                <li><a href="#settings" data-nav="settings">Settings</a></li>
+            </ul>
+
+            <div class="navbar-user">
+                <div style="text-align:right;">
+                    <div class="user-name" id="navUserName"></div>
+                    <div class="user-role" id="navUserRole"></div>
+                </div>
+                <div class="avatar" id="navAvatar"></div>
+                <button class="btn-icon" title="Logout" id="logoutBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <polyline points="16 17 21 12 16 7" />
+                        <line x1="21" y1="12" x2="9" y2="12" />
+                    </svg>
+                </button>
+            </div>
+        </nav>
+
+        <!-- ===== SIDEBAR ===== -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Menu</div>
+                <ul class="sidebar-nav" id="sidebarNav">
+                    <li><a href="#overview" data-page="overview">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="7" height="7" rx="1" />
+                                <rect x="14" y="3" width="7" height="7" rx="1" />
+                                <rect x="3" y="14" width="7" height="7" rx="1" />
+                                <rect x="14" y="14" width="7" height="7" rx="1" />
+                            </svg>
+                            Overview</a></li>
+                    <li><a href="#tank" data-page="tank">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                            Tank Monitoring</a></li>
+                    <li><a href="#alerts" data-page="alerts">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                            </svg>
+                            Alerts</a></li>
+                    <li><a href="#analytics" data-page="analytics">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="20" x2="18" y2="10" />
+                                <line x1="12" y1="20" x2="12" y2="4" />
+                                <line x1="6" y1="20" x2="6" y2="14" />
+                            </svg>
+                            Analytics</a></li>
+                    <!-- Admin only items -->
+                    <li class="admin-only"><a href="#admin-overview" data-page="admin-overview">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+                            </svg>
+                            Admin Dashboard</a></li>
+                    <li class="admin-only"><a href="#user-mgmt" data-page="user-mgmt">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                                <circle cx="9" cy="7" r="4" />
+                                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                            </svg>
+                            User Management</a></li>
+                    <li class="admin-only"><a href="#device-mgmt" data-page="device-mgmt">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="2" y="7" width="20" height="14" rx="2" />
+                                <path d="M16 7V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v3" />
+                            </svg>
+                            Device Management</a></li>
+                    <li class="admin-only"><a href="#settings" data-page="settings">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3" />
+                                <path
+                                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                            </svg>
+                            Threshold Settings</a></li>
+                    <li class="admin-only"><a href="#amda-config" data-page="amda-config">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                            </svg>
+                            AMDA Configuration</a></li>
+                    <li class="admin-only"><a href="#sensor-connect" data-page="sensor-connect">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2a10 10 0 1 0 10 10"/>
+                                <path d="M12 6a6 6 0 1 0 6 6"/>
+                                <circle cx="12" cy="12" r="2"/>
+                            </svg>
+                            Sensor Connect</a></li>
+                    <!-- LGU only -->
+                    <li class="lgu-only"><a href="#lgu-dashboard" data-page="lgu-dashboard">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                                <polyline points="9 22 9 12 15 12 15 22" />
+                            </svg>
+                            LGU Dashboard</a></li>
+                </ul>
+            </div>
+        </aside>
+        <div class="sidebar-overlay" id="sidebarOverlay"></div>
+
+        <!-- ===== MAIN CONTENT ===== -->
+        <main class="main-content" id="mainContent">
+
+            <!-- ────── USER OVERVIEW ────── -->
+            <section id="page-overview" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Dashboard Overview</h2>
+                    <p>Monitor your rainwater tank in real time</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="statWaterLevel">4,250 L</h3>
+                            <p>Current Water Level</p>
+                            <div class="stat-change up">↑ 12% from yesterday</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                <polyline points="22 4 12 14.01 9 11.01" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="statTankStatus">Normal</h3>
+                            <p>Tank Status</p>
+                            <span class="status-badge normal" id="statStatusBadge"><span
+                                    class="dot"></span>Operating</span>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="statAlerts">2</h3>
+                            <p>Active Alerts</p>
+                            <div class="stat-change down">↑ 1 new alert</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="statAMDA">87%</h3>
+                            <p>AMDA Prediction</p>
+                            <div class="stat-change up">System healthy</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tank visual + charts row -->
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Tank Water Level</div>
+                            <div class="card-subtitle" id="tankLastUpdated">Updated just now</div>
+                        </div>
+                        <div class="tank-visual">
+                            <div class="tank-container">
+                                <div class="tank-water" id="tankWater" style="height:68%"></div>
+                                <div class="tank-percent" id="tankPercent">68%</div>
+                            </div>
+                            <div class="tank-stats">
+                                <div class="tank-stat-item">
+                                    <span class="dot" style="background:var(--primary)"></span>
+                                    <div>
+                                        <div class="label">Capacity</div>
+                                        <div class="value" id="tankCapacity">5,000 L</div>
+                                    </div>
+                                </div>
+                                <div class="tank-stat-item">
+                                    <span class="dot" style="background:var(--status-normal)"></span>
+                                    <div>
+                                        <div class="label">Inflow</div>
+                                        <div class="value" id="tankInflow">45 L/hr</div>
+                                    </div>
+                                </div>
+                                <div class="tank-stat-item">
+                                    <span class="dot" style="background:var(--status-critical)"></span>
+                                    <div>
+                                        <div class="label">Outflow</div>
+                                        <div class="value" id="tankOutflow">30 L/hr</div>
+                                    </div>
+                                </div>
+                                <div class="tank-stat-item">
+                                    <span class="dot" style="background:var(--accent)"></span>
+                                    <div>
+                                        <div class="label">Status</div>
+                                        <div class="value"><span class="status-badge normal" id="tankStatusBadge"><span
+                                                    class="dot"></span>Normal</span></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Daily Water Usage</div>
+                            <div class="card-subtitle">Last 7 days</div>
+                        </div>
+                        <canvas id="chartDailyUsage"></canvas>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Weekly Consumption</div>
+                            <div class="card-subtitle">Last 4 weeks</div>
+                        </div>
+                        <canvas id="chartWeeklyConsumption"></canvas>
+                    </div>
+
+                    <div class="chart-card amda-card">
+                        <div class="card-header">
+                            <div class="card-title">🔮 AMDA Insight</div>
+                        </div>
+                        <p class="text-sm text-muted mb-1">Adaptive Multi-parameter Decision Algorithm — analyses water level, flow rate, rate of change, temporal context, and historical patterns to generate intelligent decisions.</p>
+                        <h3 id="amdaPrediction" style="font-size:2rem;color:var(--primary);margin:.5rem 0;">—</h3>
+                        <div class="amda-progress">
+                            <div class="amda-progress-bar" id="amdaProgressBar" style="width:0%"></div>
+                        </div>
+                        <p class="text-sm text-muted mt-1" id="amdaInsightText">Initialising AMDA engine…</p>
+                        <div id="amdaRecommendations" style="margin-top:.75rem;"></div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="card mb-3">
+                    <div class="card-header">
+                        <div class="card-title">Quick Actions</div>
+                    </div>
+                    <div class="quick-actions">
+                        <button class="quick-action-btn" onclick="RainGuard.navigate('alerts')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                            </svg>
+                            <span>View Alerts</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="RainGuard.navigate('analytics')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="18" y1="20" x2="18" y2="10" />
+                                <line x1="12" y1="20" x2="12" y2="4" />
+                                <line x1="6" y1="20" x2="6" y2="14" />
+                            </svg>
+                            <span>View History</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="RainGuard.navigate('settings')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3" />
+                                <path
+                                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09" />
+                            </svg>
+                            <span>Settings</span>
+                        </button>
+                        <button class="quick-action-btn" onclick="RainGuard.navigate('tank')">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                            <span>Tank Monitor</span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ────── TANK MONITORING ────── -->
+            <section id="page-tank" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Tank Monitoring</h2>
+                    <p>Real-time water level and flow data</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="tmWaterLevel">3,400 L</h3>
+                            <p>Current Water Level</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <rect x="3" y="3" width="18" height="18" rx="2" />
+                                <line x1="12" y1="8" x2="12" y2="16" />
+                                <line x1="8" y1="12" x2="16" y2="12" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="tmCapacity">5,000 L</h3>
+                            <p>Tank Capacity</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 6 13.5 15.5 8.5 10.5 1 18" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="tmInflow">45 L/hr</h3>
+                            <p>Inflow Rate</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="23 18 13.5 8.5 8.5 13.5 1 6" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="tmOutflow">30 L/hr</h3>
+                            <p>Outflow Rate</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Real-Time Water Level</div>
+                            <span class="status-badge normal" id="tmStatusIndicator"><span
+                                    class="dot"></span>Normal</span>
+                        </div>
+                        <div class="tank-visual">
+                            <div class="tank-container" style="width:200px; height:280px;">
+                                <div class="tank-water" id="tmTankWater" style="height:68%"></div>
+                                <div class="tank-percent" id="tmTankPercent" style="font-size:2rem">68%</div>
+                            </div>
+                            <div class="tank-stats">
+                                <div class="tank-stat-item"><span class="dot" style="background:var(--primary)"></span>
+                                    <div>
+                                        <div class="label">Fill Level</div>
+                                        <div class="value" id="tmFillLevel">68%</div>
+                                    </div>
+                                </div>
+                                <div class="tank-stat-item"><span class="dot"
+                                        style="background:var(--status-normal)"></span>
+                                    <div>
+                                        <div class="label">Net Flow</div>
+                                        <div class="value" id="tmNetFlow">+15 L/hr</div>
+                                    </div>
+                                </div>
+                                <div class="tank-stat-item"><span class="dot"
+                                        style="background:var(--status-low)"></span>
+                                    <div>
+                                        <div class="label">Est. Time to Full</div>
+                                        <div class="value" id="tmTimeToFull">~6.2 hrs</div>
+                                    </div>
+                                </div>
+                                <div id="tmOverflowWarning" class="hidden" style="margin-top:.75rem;">
+                                    <div class="status-badge overflow"><span class="dot"></span>⚠ Overflow Warning</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Water Level History (24h)</div>
+                        </div>
+                        <canvas id="chartTankHistory"></canvas>
+                    </div>
+                </div>
+
+                <div class="card amda-card">
+                    <div class="card-header">
+                        <div class="card-title">🔮 AMDA Predictive Insight</div>
+                    </div>
+                    <p class="text-sm text-muted mb-1">Based on current inflow/outflow patterns and weather data.</p>
+                    <div class="flex items-center gap-2 mt-1">
+                        <div style="flex:1;">
+                            <div class="amda-progress">
+                                <div class="amda-progress-bar" id="tmAmdaBar" style="width:87%"></div>
+                            </div>
+                        </div>
+                        <strong id="tmAmdaPercent" style="color:var(--primary);font-size:1.2rem;">87%</strong>
+                    </div>
+                    <p class="text-sm text-muted mt-1" id="tmAmdaText">Water supply is projected to remain sufficient
+                        for 7+ days.</p>
+                </div>
+            </section>
+
+            <!-- ────── ALERTS ────── -->
+            <section id="page-alerts" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Alerts & Notifications</h2>
+                    <p>View alert history and manage notification preferences</p>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Alert History</div>
+                            <div style="display:flex;align-items:center;gap:.75rem;">
+                                <span class="text-sm text-muted" id="alertCount">6 alerts</span>
+                                <button class="btn btn-secondary btn-sm" onclick="(function(){
+                                  if(!confirm('Clear all alert history?')) return;
+                                  localStorage.removeItem('rg_alerts');
+                                  location.reload();
+                                })()">🗑 Clear History</button>
+                            </div>
+                        </div>
+                        <div class="alert-list" id="alertList">
+                            <!-- populated by JS -->
+                        </div>
+                    </div>
+
+                    <div class="card">
+                        <div class="card-header">
+                            <div class="card-title">Notification Preferences</div>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">📱 SMS Notifications</span>
+                            <label class="toggle"><input type="checkbox" id="prefSMS" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">📧 Email Notifications</span>
+                            <label class="toggle"><input type="checkbox" id="prefEmail" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">🔔 Push Notifications (Browser)</span>
+                            <label class="toggle"><input type="checkbox" id="prefPush"><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <p class="text-sm text-muted" style="margin:.5rem 0;">Push notifications fire when AMDA detects a Critical or Emergency state. Requires browser permission.</p>
+                        <div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem;">
+                            <button class="btn btn-primary mt-2" style="width:auto;" id="savePrefsBtn">Save Preferences</button>
+                            <button class="btn btn-secondary mt-2" style="width:auto;" id="testNotifBtn">🔔 Test Push Notification</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ────── ANALYTICS ────── -->
+            <section id="page-analytics" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Usage & Analytics</h2>
+                    <p>Detailed water consumption and AMDA predictions</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>28,450 L</h3>
+                            <p>Total Collected (30d)</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                <polyline points="22 4 12 14.01 9 11.01" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>5,200 L</h3>
+                            <p>Estimated Water Savings</p>
+                            <div class="stat-change up">↑ 18% vs last month</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="analyticsAmdaPct">87%</h3>
+                            <p>AMDA Confidence</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Daily Water Usage</div>
+                        </div>
+                        <canvas id="chartAnalyticsDaily"></canvas>
+                    </div>
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Weekly Consumption</div>
+                        </div>
+                        <canvas id="chartAnalyticsWeekly"></canvas>
+                    </div>
+                </div>
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Monthly Consumption</div>
+                        </div>
+                        <canvas id="chartAnalyticsMonthly"></canvas>
+                    </div>
+                    <div class="chart-card amda-card">
+                        <div class="card-header">
+                            <div class="card-title">🔮 AMDA Predictive Chart</div>
+                        </div>
+                        <canvas id="chartAmdaPredictive"></canvas>
+                        <p class="text-sm text-muted mt-1" id="analyticsAmdaInsight">AMDA analysis shows stable water
+                            trends with low risk of shortage.</p>
+                    </div>
+                </div>
+
+                <div class="card mt-2">
+                    <div class="card-header">
+                        <div class="card-title">Export Data</div>
+                    </div>
+                    <p class="text-sm text-muted mb-2">Download your water usage data as a CSV file for further
+                        analysis.</p>
+                    <button class="btn btn-secondary download-btn" id="downloadCsvBtn">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                            <polyline points="7 10 12 15 17 10" />
+                            <line x1="12" y1="15" x2="12" y2="3" />
+                        </svg>
+                        Download CSV
+                    </button>
+                </div>
+            </section>
+
+            <!-- ────── ADMIN OVERVIEW ────── -->
+            <section id="page-admin-overview" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Admin Dashboard</h2>
+                    <p>System-wide overview and management</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                <polyline points="22 4 12 14.01 9 11.01" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="adminTotalSystems">24</h3>
+                            <p>Total Active Systems</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="adminTotalWater">142,500 L</h3>
+                            <p>Total Water Collected</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="adminActiveAlerts">5</h3>
+                            <p>Active Alerts</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3 id="adminAmdaHealth">Healthy</h3>
+                            <p>AMDA System Health</p>
+                            <span class="status-badge normal"><span class="dot"></span>Online</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-header mt-2 mb-2">
+                    <div class="card-title" style="font-size:1.1rem;">Management Panels</div>
+                </div>
+                <div class="quick-actions">
+                    <button class="quick-action-btn" onclick="RainGuard.navigate('user-mgmt')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                            <circle cx="9" cy="7" r="4" />
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                        </svg>
+                        <span>User Management</span>
+                    </button>
+                    <button class="quick-action-btn" onclick="RainGuard.navigate('device-mgmt')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="2" y="7" width="20" height="14" rx="2" />
+                            <path d="M16 7V4a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v3" />
+                        </svg>
+                        <span>Device Management</span>
+                    </button>
+                    <button class="quick-action-btn" onclick="RainGuard.navigate('settings')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33" />
+                        </svg>
+                        <span>Threshold Settings</span>
+                    </button>
+                    <button class="quick-action-btn" onclick="RainGuard.navigate('amda-config')">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                        </svg>
+                        <span>AMDA Configuration</span>
+                    </button>
+                </div>
+            </section>
+
+            <!-- ────── USER MANAGEMENT ────── -->
+            <section id="page-user-mgmt" class="page-section hidden">
+                <div class="page-header">
+                    <h2>User Management</h2>
+                    <p>Manage system users and permissions</p>
+                </div>
+
+                <div class="card">
+                    <div class="table-toolbar">
+                        <input type="text" class="search-input" id="userSearch" placeholder="Search users...">
+                        <select class="filter-select" id="userFilterRole">
+                            <option value="">All Roles</option>
+                            <option value="admin">Admin</option>
+                            <option value="user">User</option>
+                            <option value="lgu">LGU</option>
+                        </select>
+                        <select class="filter-select" id="userFilterStatus">
+                            <option value="">All Status</option>
+                            <option value="active">Active</option>
+                            <option value="inactive">Inactive</option>
+                        </select>
+                        <button class="btn btn-primary btn-sm" id="addUserBtn">+ Add User</button>
+                    </div>
+
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="userTable">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Email</th>
+                                    <th>Role</th>
+                                    <th>Status</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="userTableBody">
+                                <!-- populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ────── DEVICE MANAGEMENT ────── -->
+            <section id="page-device-mgmt" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Device Management</h2>
+                    <p>Manage sensors and devices</p>
+                </div>
+
+                <div class="card">
+                    <div class="table-toolbar">
+                        <input type="text" class="search-input" id="deviceSearch" placeholder="Search devices...">
+                        <select class="filter-select" id="deviceFilterStatus">
+                            <option value="">All Status</option>
+                            <option value="online">Online</option>
+                            <option value="offline">Offline</option>
+                            <option value="maintenance">Maintenance</option>
+                        </select>
+                        <button class="btn btn-primary btn-sm" id="addDeviceBtn">+ Add Device</button>
+                    </div>
+
+                    <div style="overflow-x:auto;">
+                        <table class="data-table" id="deviceTable">
+                            <thead>
+                                <tr>
+                                    <th>Sensor ID</th>
+                                    <th>Type</th>
+                                    <th>Status</th>
+                                    <th>Last Data</th>
+                                    <th>Calibration</th>
+                                    <th>Assigned To</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="deviceTableBody">
+                                <!-- populated by JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ────── SETTINGS ────── -->
+            <section id="page-settings" class="page-section hidden">
+                <div class="page-header">
+                    <h2>Threshold & System Settings</h2>
+                    <p>Configure tank thresholds and system parameters</p>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>Tank Configuration</h3>
+                        <div class="form-row">
+                            <label for="setCapacity">Tank Capacity (Liters)</label>
+                            <input type="number" id="setCapacity" value="5000" min="100">
+                        </div>
+                        <div class="form-row">
+                            <label for="setLow">Low Level Threshold (%)</label>
+                            <input type="number" id="setLow" value="30" min="1" max="100">
+                        </div>
+                        <div class="form-row">
+                            <label for="setCritical">Critical Level Threshold (%)</label>
+                            <input type="number" id="setCritical" value="15" min="1" max="100">
+                        </div>
+                        <div class="form-row">
+                            <label for="setOverflow">Overflow Level Threshold (%)</label>
+                            <input type="number" id="setOverflow" value="95" min="1" max="100">
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>System Settings</h3>
+                        <div class="form-row">
+                            <label for="setRefresh">Data Refresh Interval (seconds)</label>
+                            <input type="number" id="setRefresh" value="5" min="1" max="60">
+                        </div>
+                        <div class="form-row">
+                            <label>Cloud Sync Status</label>
+                            <div class="sync-indicator synced" id="syncIndicator">
+                                <span class="sync-dot"></span>
+                                <span id="syncText">Connected & Synced</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>AMDA Settings</h3>
+                        <div class="form-row">
+                            <label for="setAmdaSensitivity">Prediction Sensitivity</label>
+                            <select id="setAmdaSensitivity">
+                                <option value="low">Low</option>
+                                <option value="medium" selected>Medium</option>
+                                <option value="high">High</option>
+                            </select>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">Weather API Integration</span>
+                            <label class="toggle"><input type="checkbox" id="setWeatherApi" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                    </div>
+                </div>
+
+                <button class="btn btn-primary mt-2" style="width:auto;" id="saveSettingsBtn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save All Settings
+                </button>
+            </section>
+
+            <!-- ────── AMDA CONFIG (Admin) ────── -->
+            <section id="page-amda-config" class="page-section hidden">
+                <div class="page-header">
+                    <h2>AMDA Configuration</h2>
+                    <p>Advanced Monitoring & Data Analytics engine settings</p>
+                </div>
+
+                <div class="settings-grid">
+                    <div class="settings-card">
+                        <h3>Algorithm: AMDA</h3>
+                        <div style="padding:.75rem;background:var(--primary-bg);border-radius:8px;margin-bottom:1rem;">
+                            <strong style="color:var(--primary);">Adaptive Multi-parameter Decision Algorithm</strong>
+                            <p class="text-sm text-muted" style="margin-top:.4rem;line-height:1.7;">Analyses 5 weighted parameters (water level, flow rate, rate of change, days of supply, historical pattern) with temporal context to generate a composite score (0–100) mapped to 5 states: Sufficient, Adequate, Low, Critical, Emergency. Provides predictive analytics and specific actionable recommendations.</p>
+                        </div>
+                        <div class="form-row">
+                            <label for="amdaHorizon">Forecast Horizon (days)</label>
+                            <input type="number" id="amdaHorizon" value="7" min="1" max="30">
+                        </div>
+                        <div class="form-row">
+                            <label for="amdaConfidence">Alert Sensitivity</label>
+                            <select id="amdaConfidence">
+                                <option value="90">High (alert at score &lt; 60)</option>
+                                <option value="95" selected>Medium (alert at score &lt; 40)</option>
+                                <option value="99">Low (alert at score &lt; 20)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Data Sources</h3>
+                        <div class="toggle-row">
+                            <span class="toggle-label">Weather Data Feed</span>
+                            <label class="toggle"><input type="checkbox" id="amdaWeather" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">Historical Patterns</span>
+                            <label class="toggle"><input type="checkbox" id="amdaHistorical" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">Seasonal Adjustment</span>
+                            <label class="toggle"><input type="checkbox" id="amdaSeasonal" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div class="toggle-row">
+                            <span class="toggle-label">Community Data</span>
+                            <label class="toggle"><input type="checkbox" id="amdaCommunity"><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                    </div>
+
+                    <div class="settings-card">
+                        <h3>Alert Automation</h3>
+                        <div class="toggle-row">
+                            <span class="toggle-label">Auto-generate Alerts from AMDA</span>
+                            <label class="toggle"><input type="checkbox" id="amdaAutoAlert" checked><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div class="form-row">
+                            <label for="amdaAlertThreshold">Alert Trigger Threshold (%)</label>
+                            <input type="number" id="amdaAlertThreshold" value="30" min="10" max="90">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Weather Forecast Live Output -->
+                <div class="card mt-2" style="background:linear-gradient(135deg,rgba(25,118,210,.06),rgba(0,188,212,.06));border:1px solid rgba(25,118,210,.2);">
+                    <div class="card-header">
+                        <div class="card-title">☔ Weather Forecast Integration</div>
+                        <span class="status-badge normal" id="weatherBonusBadge">Loading…</span>
+                    </div>
+                    <p class="text-sm text-muted" style="margin-bottom:.5rem;">Live 3-day rain forecast from <strong>Open-Meteo API</strong> (free, no API key required). Rain data adjusts the AMDA inflow score automatically.</p>
+                    <p id="weatherForecastText" style="font-size:.88rem;color:var(--text);">Fetching forecast…</p>
+                    <p class="text-sm text-muted mt-1">⚠ The <strong>Weather API Integration</strong> toggle above enables/disables this. Requires internet connection. Location detected via browser Geolocation or defaults to Metro Manila.</p>
+                </div>
+
+                <button class="btn btn-primary mt-2" style="width:auto;" id="saveAmdaBtn">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                        <polyline points="17 21 17 13 7 13 7 21" />
+                        <polyline points="7 3 7 8 15 8" />
+                    </svg>
+                    Save AMDA Configuration
+                </button>
+            </section>
+
+            <!-- ────── SENSOR CONNECT (Admin) ────── -->
+            <section id="page-sensor-connect" class="page-section hidden">
+                <div class="page-header">
+                    <h2>📡 Sensor Connect</h2>
+                    <p>Connect your ESP32 hardware and view the live sensor data feed</p>
+                </div>
+
+                <!-- Browser support warning -->
+                <div id="serialSupportWarn" class="hidden" style="background:rgba(255,152,0,.12);border:1px solid rgba(255,152,0,.4);border-radius:10px;padding:1rem 1.25rem;margin-bottom:1.25rem;">
+                    <strong>⚠ Web Serial API not supported</strong> — Please use Google Chrome or Microsoft Edge (version 89+) to connect hardware sensors directly from the browser.
+                </div>
+
+                <!-- Tab bar -->
+                <div style="display:flex;gap:.5rem;margin-bottom:1.25rem;">
+                    <button class="btn btn-primary btn-sm sc-tab-btn active" data-tab="guide">📋 Hardware Guide</button>
+                    <button class="btn btn-secondary btn-sm sc-tab-btn" data-tab="live">🔌 Live Connection</button>
+                </div>
+
+                <!-- ── TAB: Hardware Guide ── -->
+                <div id="sc-pane-guide" class="sc-tab-pane">
+                    <div class="settings-grid">
+                        <div class="settings-card">
+                            <h3>Required Components</h3>
+                            <table class="data-table" style="margin-top:.5rem;">
+                                <thead><tr><th>Component</th><th>Model</th><th>Purpose</th></tr></thead>
+                                <tbody>
+                                    <tr><td>Microcontroller</td><td><strong>ESP32 Dev Module</strong></td><td>Main controller + USB Serial</td></tr>
+                                    <tr><td>Flow Meter (×2)</td><td><strong>YF-S201</strong></td><td>Inflow &amp; Outflow rate (L/hr)</td></tr>
+                                    <tr><td>Ultrasonic Sensor</td><td><strong>HC-SR04</strong></td><td>Water level (cm → %)</td></tr>
+                                    <tr><td>Temp Sensor (opt.)</td><td><strong>DS18B20</strong></td><td>Water temperature (°C)</td></tr>
+                                    <tr><td>Resistors</td><td>1kΩ, 2kΩ, 10kΩ, 4.7kΩ</td><td>Voltage divider &amp; pull-ups</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="settings-card">
+                            <h3>Pin Wiring Map</h3>
+                            <table class="data-table" style="margin-top:.5rem;">
+                                <thead><tr><th>Sensor</th><th>Sensor Pin</th><th>ESP32 GPIO</th><th>Note</th></tr></thead>
+                                <tbody>
+                                    <tr><td>HC-SR04</td><td>VCC</td><td>Vin (5V)</td><td>—</td></tr>
+                                    <tr><td>HC-SR04</td><td>GND</td><td>GND</td><td>—</td></tr>
+                                    <tr><td>HC-SR04</td><td>TRIG</td><td>GPIO 5</td><td>Digital out</td></tr>
+                                    <tr><td>HC-SR04</td><td>ECHO</td><td>GPIO 18</td><td>⚡ Via 1kΩ+2kΩ divider</td></tr>
+                                    <tr><td>YF-S201 (In)</td><td>Red</td><td>Vin (5V)</td><td>—</td></tr>
+                                    <tr><td>YF-S201 (In)</td><td>Black</td><td>GND</td><td>—</td></tr>
+                                    <tr><td>YF-S201 (In)</td><td>Yellow</td><td>GPIO 14</td><td>+ 10kΩ pull-up to 3.3V</td></tr>
+                                    <tr><td>YF-S201 (Out)</td><td>Yellow</td><td>GPIO 27</td><td>+ 10kΩ pull-up to 3.3V</td></tr>
+                                    <tr><td>DS18B20 (opt.)</td><td>DATA</td><td>GPIO 4</td><td>+ 4.7kΩ pull-up to 3.3V</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card mt-2">
+                        <div class="card-header"><div class="card-title">⚡ Voltage Divider — HC-SR04 ECHO Pin</div></div>
+                        <p class="text-sm text-muted" style="margin:.75rem 0 .5rem;">The HC-SR04 outputs 5V on the ECHO pin. The ESP32 GPIO is 3.3V-tolerant only. Use a simple resistor divider:</p>
+                        <pre style="background:var(--surface-2,#1a2138);color:#a5d6fb;padding:1rem;border-radius:8px;font-size:.82rem;overflow-x:auto;">HC-SR04 ECHO ──[1kΩ]──┬──[2kΩ]── GND
+                       └── GPIO 18 (ESP32)  ≈ 3.33V ✓</pre>
+                    </div>
+
+                    <div class="card mt-2">
+                        <div class="card-header">
+                            <div class="card-title">📄 Arduino Sketch Setup</div>
+                            <a href="esp32_sketch.ino" download class="btn btn-secondary btn-sm">⬇ Download .ino</a>
+                        </div>
+                        <p class="text-sm text-muted" style="margin:.75rem 0 .5rem;">Flash <code>esp32_sketch.ino</code> to your ESP32. It outputs JSON over USB Serial at 115200 baud every 2 seconds:</p>
+                        <pre style="background:var(--surface-2,#1a2138);color:#a5d6fb;padding:1rem;border-radius:8px;font-size:.82rem;overflow-x:auto;">{"level":68.4, "inflow":42.1, "outflow":31.5, "temp":28.2, "ts":1234567}</pre>
+                        <ol style="margin:.75rem 0 0 1.25rem;font-size:.88rem;line-height:1.9;color:var(--text-secondary);">
+                            <li>Open Arduino IDE → Install <strong>ESP32 board support</strong> (Espressif)</li>
+                            <li>Select board: <strong>ESP32 Dev Module</strong>, Upload speed: 115200</li>
+                            <li>Open <code>esp32_sketch.ino</code> → set <code>TANK_HEIGHT_CM</code> to your tank's real height</li>
+                            <li>Upload → open Serial Monitor at 115200 to verify JSON output</li>
+                            <li>Switch to the <strong>Live Connection</strong> tab → click <strong>Connect ESP32</strong></li>
+                        </ol>
+                    </div>
+                </div>
+
+                <!-- ── TAB: Live Connection ── -->
+                <div id="sc-pane-live" class="sc-tab-pane hidden">
+                    <div class="stats-grid" style="margin-bottom:1.25rem;">
+                        <div class="stat-card">
+                            <div class="stat-icon cyan">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="liveLevel">—</h3>
+                                <p>Water Level</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon green">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/></svg>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="liveInflow">—</h3>
+                                <p>Inflow Rate</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon orange">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 18 13.5 8.5 8.5 13.5 1 6"/></svg>
+                            </div>
+                            <div class="stat-info">
+                                <h3 id="liveOutflow">—</h3>
+                                <p>Outflow Rate</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="charts-grid">
+                        <div class="card">
+                            <div class="card-header">
+                                <div class="card-title">🔌 ESP32 Connection</div>
+                                <span class="status-badge inactive" id="serialIndicator"><span class="dot"></span><span id="serialStatus">Disconnected</span></span>
+                            </div>
+                            <p class="text-sm text-muted" style="margin:.5rem 0 1rem;">Connect your ESP32 via USB. The browser will prompt you to select the COM port. Requires Chrome / Edge 89+.</p>
+                            <div style="display:flex;gap:.75rem;align-items:center;flex-wrap:wrap;">
+                                <button class="btn btn-primary" id="serialConnectBtn">Connect ESP32</button>
+                            </div>
+                            <div style="margin-top:1rem;padding:.75rem;background:var(--surface-2,#f8fafc);border-radius:8px;font-size:.82rem;">
+                                <strong>Last packet:</strong><br>
+                                <span id="serialLastPacket" style="color:var(--text-muted);">No data received yet</span>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header">
+                                <div class="card-title">🖥 Serial Monitor</div>
+                                <button class="btn btn-secondary btn-sm" id="serialClearBtn">Clear</button>
+                            </div>
+                            <textarea id="serialMonitor" readonly
+                                style="width:100%;height:220px;background:#0d1117;color:#57f287;font-family:'Courier New',monospace;font-size:.78rem;border:none;border-radius:6px;padding:.75rem;resize:vertical;box-sizing:border-box;outline:none;"
+                                placeholder="Serial output will appear here when ESP32 is connected..."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="card amda-card mt-2">
+                        <div class="card-header"><div class="card-title">🔮 Live AMDA Score</div></div>
+                        <p class="text-sm text-muted mb-1">AMDA is computed from live sensor data every 3 seconds. Connect your ESP32 to see real scores.</p>
+                        <div class="flex items-center gap-2 mt-1">
+                            <div style="flex:1;"><div class="amda-progress"><div class="amda-progress-bar" id="tmAmdaBarSC" style="width:0%"></div></div></div>
+                            <strong id="tmAmdaPercentSC" style="color:var(--primary);font-size:1.2rem;">—</strong>
+                        </div>
+                        <p class="text-sm text-muted mt-1" id="tmAmdaTextSC">Waiting for sensor data…</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ────── LGU DASHBOARD ────── -->
+            <section id="page-lgu-dashboard" class="page-section hidden">
+                <div class="page-header">
+                    <h2>LGU Dashboard</h2>
+                    <p>Community rainwater monitoring overview (read-only)</p>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon green">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+                                <polyline points="22 4 12 14.01 9 11.01" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>48</h3>
+                            <p>Total Active Systems</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon blue">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path
+                                    d="M12 2c-5.33 4.55-8 8.48-8 11.8 0 4.98 3.8 8.2 8 8.2s8-3.22 8-8.2C20 10.48 17.33 6.55 12 2z" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>285,000 L</h3>
+                            <p>Total Water Collected (30d)</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon orange">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                                <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>12</h3>
+                            <p>Active Alerts</p>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon cyan">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+                            </svg>
+                        </div>
+                        <div class="stat-info">
+                            <h3>92%</h3>
+                            <p>AMDA Regional Confidence</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Community Tank Map</div>
+                        </div>
+                        <div class="map-placeholder">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                                <circle cx="12" cy="10" r="3" />
+                            </svg>
+                            <span>Community Tank Map</span>
+                            <span style="font-size:.82rem;">Interactive map placeholder — shows tank locations across
+                                the region</span>
+                        </div>
+                    </div>
+
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Regional Water Usage</div>
+                        </div>
+                        <canvas id="chartLguRegional"></canvas>
+                    </div>
+                </div>
+
+                <div class="charts-grid">
+                    <div class="chart-card">
+                        <div class="card-header">
+                            <div class="card-title">Aggregated Statistics</div>
+                        </div>
+                        <canvas id="chartLguAggregated"></canvas>
+                    </div>
+
+                    <div class="card amda-card">
+                        <div class="card-header">
+                            <div class="card-title">🔮 AMDA Regional Insight</div>
+                        </div>
+                        <p class="text-sm text-muted">Community-level water sufficiency prediction based on aggregated
+                            data from all monitored tanks in the region.</p>
+                        <div class="flex items-center gap-2 mt-1">
+                            <div style="flex:1;">
+                                <div class="amda-progress">
+                                    <div class="amda-progress-bar" style="width:92%"></div>
+                                </div>
+                            </div>
+                            <strong style="color:var(--primary);font-size:1.2rem;">92%</strong>
+                        </div>
+                        <p class="text-sm text-muted mt-1">Regional water supply is projected to remain above safe
+                            levels. 45 of 48 systems reporting nominal status.</p>
+                    </div>
+                </div>
+            </section>
+
+        </main><!-- /main-content -->
+
+        <!-- ===== BOTTOM NAV (mobile) ===== -->
+        <nav class="bottom-nav" id="bottomNav">
+            <ul class="bottom-nav-items" id="bottomNavItems">
+                <li><a href="#overview" data-nav="overview">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="7" height="7" rx="1" />
+                            <rect x="14" y="3" width="7" height="7" rx="1" />
+                            <rect x="3" y="14" width="7" height="7" rx="1" />
+                            <rect x="14" y="14" width="7" height="7" rx="1" />
+                        </svg>
+                        Home</a></li>
+                <li><a href="#alerts" data-nav="alerts">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+                        </svg>
+                        Alerts</a></li>
+                <li><a href="#analytics" data-nav="analytics">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="20" x2="18" y2="10" />
+                            <line x1="12" y1="20" x2="12" y2="4" />
+                            <line x1="6" y1="20" x2="6" y2="14" />
+                        </svg>
+                        Analytics</a></li>
+                <li><a href="#settings" data-nav="settings">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="3" />
+                            <path
+                                d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33" />
+                        </svg>
+                        Settings</a></li>
+            </ul>
+        </nav>
+
+    </div><!-- /app-layout -->
+
+    <!-- ===== MODAL TEMPLATE ===== -->
+    <div class="modal-backdrop hidden" id="modalBackdrop">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="modalTitle">Modal Title</h3>
+                <button class="btn-icon" id="modalCloseBtn">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18" />
+                        <line x1="6" y1="6" x2="18" y2="18" />
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- dynamic content -->
+            </div>
+            <div class="modal-footer" id="modalFooter">
+                <button class="btn btn-secondary btn-sm" id="modalCancelBtn">Cancel</button>
+                <button class="btn btn-primary btn-sm" id="modalSaveBtn">Save</button>
+            </div>
+        </div>
+    </div>
+    <script type="module">
+      import { initializeApp } 
+        from "https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js";
+      import { getDatabase, ref, set } 
+        from "https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyDUl8OAB7qROUm7Zzh5n-d_Lx3Ey-V4Ll4",
+        authDomain: "rainguard-c2f9d.firebaseapp.com",
+        databaseURL: "https://rainguard-c2f9d-default-rtdb.asia-southeast1.firebasedatabase.app",
+        projectId: "rainguard-c2f9d",
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const db  = getDatabase(app);
+
+      window._firebaseDB  = db;
+      window._firebaseRef = ref;
+      window._firebaseSet = set;
+
+      console.log("Firebase ready");
+    </script>
+
+    <script src="script.js"></script>
+</body>
+
+</html>

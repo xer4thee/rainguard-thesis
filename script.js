@@ -1,0 +1,1737 @@
+/**
+ * RainGuard — Main Application Script
+ * AMDA v2 • SensorHub • Web Serial API • XSS-hardened
+ * Modular structure: Auth, Router, Data, Dashboard, Tank, Alerts, Analytics,
+ * Admin, User Mgmt, Device Mgmt, Settings, LGU
+ */
+
+const RainGuard = (function () {
+  'use strict';
+
+  /* ──────────────────────────────────────────
+     CONFIGURATION & STATE
+     ────────────────────────────────────────── */
+  const DEFAULT_SETTINGS = {
+    capacity: 5000,
+    lowThreshold: 30,
+    criticalThreshold: 15,
+    overflowThreshold: 95,
+    refreshInterval: 5,
+    amdaSensitivity: 'medium',
+    weatherApi: true,
+  };
+
+  const DEFAULT_USERS = [
+    { id: 1, username: 'admin',     email: 'admin@rainguard.io',    role: 'admin', status: 'active'   },
+    { id: 2, username: 'jdoe',      email: 'jdoe@example.com',      role: 'user',  status: 'active'   },
+    { id: 3, username: 'msmith',    email: 'msmith@example.com',    role: 'user',  status: 'active'   },
+    { id: 4, username: 'lgu_viewer',email: 'lgu@cityoffice.gov',    role: 'lgu',   status: 'active'   },
+    { id: 5, username: 'apark',     email: 'apark@example.com',     role: 'user',  status: 'inactive' },
+    { id: 6, username: 'bcruz',     email: 'bcruz@example.com',     role: 'admin', status: 'active'   },
+  ];
+
+  const DEFAULT_DEVICES = [
+    { id: 'SNS-001', type: 'Water Level', status: 'online',  lastData: '2026-02-16 20:30', calibration: '2026-01-10', assignedTo: 'Tank A' },
+    { id: 'SNS-002', type: 'Flow Rate',   status: 'online',  lastData: '2026-02-16 20:28', calibration: '2026-01-10', assignedTo: 'Tank A' },
+    { id: 'SNS-003', type: 'Water Level', status: 'offline', lastData: '2026-02-15 14:12', calibration: '2025-12-20', assignedTo: 'Tank B' },
+    { id: 'SNS-004', type: 'Quality',     status: 'online',  lastData: '2026-02-16 20:25', calibration: '2026-02-01', assignedTo: 'Tank A' },
+    { id: 'SNS-005', type: 'Flow Rate',   status: 'maintenance', lastData: '2026-02-14 09:00', calibration: '2025-11-15', assignedTo: 'Tank C' },
+  ];
+
+  /* Load persisted alerts from localStorage (merges with seed data) */
+  const _SEED_ALERTS = [
+    { type: 'warning',  title: 'Low Water Level',   message: 'Tank B water level dropped below 30%.', time: '10 min ago' },
+    { type: 'critical', title: 'Critical Level',     message: 'Tank C approaching critical level at 16%.', time: '25 min ago' },
+    { type: 'info',     title: 'Sensor Reconnected', message: 'SNS-003 back online after maintenance.', time: '1 hr ago' },
+    { type: 'danger',   title: 'Overflow Alert',     message: 'Tank A reached 96% capacity during heavy rain.', time: '2 hrs ago' },
+    { type: 'warning',  title: 'High Outflow',       message: 'Outflow rate exceeded 80 L/hr on Tank A.', time: '3 hrs ago' },
+    { type: 'info',     title: 'AMDA Engine Active',  message: 'AMDA v2 running — 5-parameter weighted scoring with predictive analytics.', time: '5 hrs ago' },
+  ];
+  const DEFAULT_ALERTS = loadFromStorageEarly('alerts', _SEED_ALERTS);
+
+  /* Early-access storage helper (before $ helpers are defined) */
+  function loadFromStorageEarly(key, fallback) {
+    try { const v = localStorage.getItem('rg_' + key); return v ? JSON.parse(v) : fallback; }
+    catch { return fallback; }
+  }
+
+  let state = {
+    role: null,
+    user: null,
+    currentPage: 'overview',
+    waterLevel: 3400,
+    settings: {},
+    users: [],
+    devices: [],
+    charts: {},
+    intervals: [],
+  };
+
+  /* ──────────────────────────────────────────
+     HELPERS
+     ────────────────────────────────────────── */
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => document.querySelectorAll(sel);
+  const fmt = (n) => n.toLocaleString();
+
+  function loadFromStorage(key, fallback) {
+    try { const v = localStorage.getItem('rg_' + key); return v ? JSON.parse(v) : fallback; }
+    catch { return fallback; }
+  }
+  function saveToStorage(key, val) { localStorage.setItem('rg_' + key, JSON.stringify(val)); }
+
+  function showToast(msg) {
+    let t = document.createElement('div');
+    t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1A2138;color:#fff;padding:.7rem 1.5rem;border-radius:8px;font-size:.88rem;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.2);animation:fadeUp .3s ease';
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; t.style.transition = '.3s'; setTimeout(() => t.remove(), 300); }, 2500);
+  }
+
+  function randBetween(a, b) { return Math.floor(Math.random() * (b - a + 1)) + a; }
+
+  /* ──────────────────────────────────────────
+     SECURITY — INPUT SANITIZER
+     Never let user-supplied strings reach innerHTML.
+     ────────────────────────────────────────── */
+  function sanitizeText(str) {
+    const d = document.createElement('div');
+    d.textContent = String(str == null ? '' : str);
+    return d.innerHTML; // entity-encoded, safe for innerHTML use
+  }
+
+  /* ──────────────────────────────────────────
+     AMDA ENGINE
+     Adaptive Multi-parameter Decision Algorithm
+     5 weighted parameters + temporal context → score 0-100 → 5 states
+     Predictive analytics + actionable recommendations
+     ────────────────────────────────────────── */
+  const AMDA = {
+    /*
+     * Parameter weights — must sum to 1.0
+     *   P1 Water Level        30%  — current tank fill %
+     *   P2 Flow Rate (inflow) 20%  — rate of water coming in
+     *   P3 Rate of Change     20%  — trend: is level rising or falling?
+     *   P4 Days of Supply     15%  — how long until depletion at current net rate
+     *   P5 Historical Pattern 15%  — deviation from the rolling average baseline
+     */
+    WEIGHTS: { level: 0.30, inflow: 0.20, rateOfChange: 0.20 },
+
+    /* 5-state output thresholds */
+    STATES: [
+      { min: 90, label: 'Critical High', cls: 'overflow',   icon: '✅' },
+      { min: 70, label: 'High',   cls: 'warning',   icon: '🟡' },
+      { min: 30, label: 'Normal',        cls: 'normal',      icon: '🟠' },
+      { min: 20, label: 'Low',   cls: 'low', icon: '🔴' },
+      { min: 0,  label: 'Critical Low',  cls: 'critical', icon: '⛔' },
+    ],
+
+    /**
+     * Full AMDA computation.
+     * @param {object} p
+     * @param {number}   p.levelPct    Tank fill %  (0-100)
+     * @param {number}   p.inflowLPH   Inflow  L/hr
+     * @param {number}   p.outflowLPH  Outflow L/hr
+     * @param {number}   p.capacityL   Tank capacity in litres
+     * @param {Array}    p.history     SensorHub._history snapshot
+     * @returns {{score, state, breakdown, predictions, recommendations, daysRemaining}}
+     */
+    compute(p) {
+      const { levelPct, inflowLPH, outflowLPH, capacityL, history = [], horizonDays = 7 } = p;
+      const W = this.WEIGHTS;
+
+      /* ── P1: Water Level (0-100) ── */
+      const s1 = Math.min(100, Math.max(0, levelPct));
+
+      /* ── P2: Flow Rate — inflow normalised to 80 L/hr = 100% excellent ── */
+      const s2 = Math.min(100, (inflowLPH / 80) * 100);
+
+      /* ── P3: Rate of Change — is the tank trending up or down? ──
+         Uses the last 5 history points.
+         +10%/window → score 100, -10%/window → score 0, neutral → 50 */
+      let s3 = 50; // neutral when no history
+      if (history.length >= 2) {
+        const slice = history.slice(-Math.min(6, history.length));
+        const delta = slice[slice.length - 1].levelPct - slice[0].levelPct;
+        s3 = Math.min(100, Math.max(0, 50 + delta * 4));
+      }
+
+      /* ── P4: Days of Supply ──
+         Scored against the configured forecast horizon (default 7 days).
+         If outflow > inflow → draining → compute depletion time
+         If inflow >= outflow → filling → assume horizon+1 days (max score) */
+      const currentL      = (levelPct / 100) * capacityL;
+      const netHourlyDef  = outflowLPH - inflowLPH; // positive = draining
+      const daysRemaining = netHourlyDef > 0 ? currentL / (netHourlyDef * 24) : (horizonDays + 1);
+      const s4 = Math.min(100, (daysRemaining / horizonDays) * 100); // horizon days = 100 score
+
+      /* ── P5: Historical Pattern — deviation from rolling 20-reading baseline ──
+         If current level is above historical average → good (score > 50)
+         If below → bad (score < 50) */
+      let s5 = 50;
+      if (history.length >= 5) {
+        const window = history.slice(-Math.min(20, history.length));
+        const avg = window.reduce((sum, h) => sum + h.levelPct, 0) / window.length;
+        const deviation = levelPct - avg;          // positive = above average
+        s5 = Math.min(100, Math.max(0, 50 + deviation * 2));
+      }
+
+      /* ── Temporal Context Multiplier ──
+         Peak usage hours (morning 6-9am, evening 6-9pm) → slight penalty
+         Night hours → slight bonus (low usage expected) */
+      const hour = new Date().getHours();
+      const isPeak  = (hour >= 6 && hour <= 9) || (hour >= 18 && hour <= 21);
+      const isNight = hour >= 22 || hour < 5;
+      const tempMult = isPeak ? 0.96 : isNight ? 1.02 : 1.0;
+
+      /* ── Composite Score ── */
+      const raw   = (s1 * W.level) + (s2 * W.inflow) + (s3 * W.rateOfChange) + (s4 * W.daysSupply) + (s5 * W.historical);
+      const score = Math.round(Math.min(100, Math.max(0, raw * tempMult)));
+      const state = this.STATES.find(st => score >= st.min) || this.STATES[4];
+
+      /* ── Predictive Analytics ── */
+      const netFillHourly   = inflowLPH - outflowLPH; // positive = filling
+      const spaceLeft       = capacityL - currentL;
+      const timeToOverflowH = netFillHourly > 0 ? spaceLeft / netFillHourly : null;
+      const timeToDepleteH  = netHourlyDef > 0  ? currentL / netHourlyDef   : null;
+      const trend           = this._getTrend(history);
+      const consumptionTrend= this._getConsumptionTrend(history);
+
+      /* ── Actionable Recommendations ── */
+      const recommendations = this._getRecommendations({
+        levelPct, inflowLPH, outflowLPH, score,
+        daysRemaining, timeToOverflowH, timeToDepleteH, trend,
+      });
+
+      return {
+        score,
+        state,
+        breakdown: {
+          s1: Math.round(s1), s2: Math.round(s2), s3: Math.round(s3),
+          s4: Math.round(s4), s5: Math.round(s5),
+          temporalCtx: isPeak ? 'Peak Usage' : isNight ? 'Night (low usage)' : 'Normal',
+        },
+        daysRemaining: Math.round(Math.min(30, daysRemaining)),
+        predictions: {
+          timeToOverflowH: timeToOverflowH !== null ? +timeToOverflowH.toFixed(1) : null,
+          timeToDepleteH:  timeToDepleteH  !== null ? +timeToDepleteH.toFixed(1)  : null,
+          trend,
+          consumptionTrend,
+        },
+        recommendations,
+      };
+    },
+
+    /* Returns level trend based on recent history */
+    _getTrend(history) {
+      if (history.length < 3) return 'stable';
+      const slice = history.slice(-Math.min(8, history.length));
+      const delta = slice[slice.length - 1].levelPct - slice[0].levelPct;
+      if (delta >  3) return 'rising';
+      if (delta < -3) return 'falling';
+      return 'stable';
+    },
+
+    /* Returns consumption trend: increasing / stable / decreasing */
+    _getConsumptionTrend(history) {
+      if (history.length < 6) return 'stable';
+      const half = Math.floor(history.length / 2);
+      const older = history.slice(0, half);
+      const newer = history.slice(half);
+      const avgOld = older.reduce((s, h) => s + h.outflowLPH, 0) / older.length;
+      const avgNew = newer.reduce((s, h) => s + h.outflowLPH, 0) / newer.length;
+      const diff = avgNew - avgOld;
+      if (diff >  5) return 'increasing';
+      if (diff < -5) return 'decreasing';
+      return 'stable';
+    },
+
+    /**
+     * Generate specific, context-aware actionable recommendations.
+     * These go beyond simple status — they tell users exactly what to do.
+     */
+    _getRecommendations({ levelPct, inflowLPH, outflowLPH, score,
+                          daysRemaining, timeToOverflowH, timeToDepleteH, trend }) {
+      const recs = [];
+
+      /* ── Overflow prevention ── */
+      if (timeToOverflowH !== null && timeToOverflowH < 2) {
+        recs.push({ priority: 'danger',  text: '⛔ Stop rainwater collection NOW — overflow in ~' + timeToOverflowH + ' hr(s).' });
+      } else if (timeToOverflowH !== null && timeToOverflowH < 8) {
+        recs.push({ priority: 'warning', text: '⚠️ Prepare to divert or stop collection — overflow in ~' + timeToOverflowH + ' hr(s).' });
+      } else if (levelPct >= 90) {
+        recs.push({ priority: 'warning', text: '⚠️ Tank above 90% — consider stopping collection to prevent overflow.' });
+      }
+
+      /* ── Depletion prevention ── */
+      if (daysRemaining < 1) {
+        recs.push({ priority: 'danger',  text: '🚨 Tank will be EMPTY within hours. Activate backup water supply immediately.' });
+        recs.push({ priority: 'danger',  text: '📞 Report critical shortage to LGU water management office.' });
+      } else if (daysRemaining < 2) {
+        recs.push({ priority: 'danger',  text: '🛢️ Only ~' + daysRemaining.toFixed(1) + ' day(s) of supply remaining. Deploy backup supply now.' });
+        recs.push({ priority: 'warning', text: '🚿 Immediately stop all non-essential usage (gardening, washing vehicles).' });
+      } else if (daysRemaining < 5) {
+        recs.push({ priority: 'warning', text: '💧 ~' + Math.round(daysRemaining) + ' day(s) remaining — reduce consumption by at least 30%.' });
+        recs.push({ priority: 'info',    text: '🛢️ Prepare a backup water supply in advance.' });
+      } else if (daysRemaining < 7) {
+        recs.push({ priority: 'info',    text: '👁️ ~' + Math.round(daysRemaining) + ' day(s) of supply — monitor usage and avoid waste.' });
+      }
+
+      /* ── Collection guidance ── */
+      if (trend === 'falling' && inflowLPH < outflowLPH * 0.5) {
+        recs.push({ priority: 'warning', text: '📉 Inflow is much lower than outflow. Check for blocked collection pipes or dry conditions.' });
+      }
+      if (trend === 'rising' && levelPct < 80) {
+        recs.push({ priority: 'info',    text: '📈 Tank is filling well. Continue normal collection.' });
+      }
+
+      /* ── Healthy state ── */
+      if (score >= 80 && recs.length === 0) {
+        recs.push({ priority: 'success', text: '✅ System is healthy. Continue current collection and usage patterns.' });
+        if (inflowLPH > outflowLPH * 1.5) {
+          recs.push({ priority: 'info', text: '💡 Strong inflow detected — good time to increase usage or fill reserves.' });
+        }
+      }
+
+      /* ── Fallback ── */
+      if (levelPct >= 90) {
+  recs.push({ priority: 'success', text: '🌱 Tank is full — great time to water your garden or plants (non-potable use only).' });
+  recs.push({ priority: 'success', text: '🚗 Good time for car washing, driveway, or outdoor area cleaning.' });
+  recs.push({ priority: 'success', text: '🪣 Consider filling reserve containers before overflow occurs.' });
+} else if (levelPct >= 70) {
+  recs.push({ priority: 'info', text: '🌻 Good for garden irrigation, potted plants, and lawn care.' });
+  recs.push({ priority: 'info', text: '🧹 Suitable for outdoor cleaning: pathways, fences, outdoor furniture.' });
+  recs.push({ priority: 'info', text: '🚽 Safe for toilet flushing and non-contact household cleaning.' });
+} else if (levelPct >= 30) {
+  recs.push({ priority: 'info', text: '✅ Normal range — safe for toilet flushing, floor mopping, and garden watering.' });
+  recs.push({ priority: 'info', text: '🧺 Suitable for pre-rinsing laundry or washing non-food items.' });
+} else if (levelPct >= 20) {
+  recs.push({ priority: 'warning', text: '⚠️ Running low — prioritize toilet flushing only. Suspend gardening and car washing.' });
+  recs.push({ priority: 'warning', text: '🚫 Avoid large-volume tasks: mopping large areas, laundry pre-rinse.' });
+} else {
+  recs.push({ priority: 'danger', text: '🚨 CRITICAL — suspend all non-essential water use immediately.' });
+  recs.push({ priority: 'danger', text: '📞 Alert all household members. Switch to municipal or backup water source.' });
+}
+
+/* ── Non-potable disclaimer — ALWAYS shown last ── */
+recs.push({ priority: 'info', text: '⚠️ Reminder: All collected rainwater is for non-potable use only — not for drinking or cooking.' });
+
+/* ── Fallback if no recs were added at all ── */
+if (recs.length === 1) { // only disclaimer was added
+  recs.unshift({ priority: 'info', text: '👁️ Monitor tank levels. Maintain current consumption.' });
+}
+
+      return recs;
+    },
+  };
+
+  /* ──────────────────────────────────────────
+     SENSOR HUB
+     Central store for live sensor readings.
+     Falls back to simulation when no hardware connected.
+     ────────────────────────────────────────── */
+  const SensorHub = {
+    live: false,  // true when real serial data is flowing
+    latest: {
+      levelPct:   68,
+      inflowLPH:  45,
+      outflowLPH: 30,
+      tempC:      28,
+      ts:         Date.now(),
+    },
+    _history: [],
+    MAX_HISTORY: 120,
+
+    /** Called by SerialManager when a valid JSON packet arrives */
+    ingest(packet) {
+      if (typeof packet.level   === 'number') this.latest.levelPct   = Math.min(100, Math.max(0, packet.level));
+      if (typeof packet.inflow  === 'number') this.latest.inflowLPH  = Math.max(0, packet.inflow);
+      if (typeof packet.outflow === 'number') this.latest.outflowLPH = Math.max(0, packet.outflow);
+      if (typeof packet.temp    === 'number') this.latest.tempC       = packet.temp;
+      this.latest.ts = Date.now();
+      this.live      = true;
+
+      /* Keep rolling history */
+      this._history.push({ ...this.latest, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+      if (this._history.length > this.MAX_HISTORY) this._history.shift();
+
+      /* Sync waterLevel state so existing functions still work */
+     state.waterLevel = Math.round((this.latest.levelPct / 100) * (state.settings.capacity || 5000));
+
+      /* Write to Firebase */
+      this._writeToFirebase();
+    },
+
+    _writeToFirebase() {
+      if (!window._firebaseDB) return;
+      try {
+        const db  = window._firebaseDB;
+        const ref = window._firebaseRef;
+        const set = window._firebaseSet;
+        const ts  = Date.now();
+        const amda = this.runAmda();
+
+        set(ref(db, 'sensor_readings/' + ts), {
+          level_percent:  this.latest.levelPct,
+          inflow_lph:     this.latest.inflowLPH,
+          outflow_lph:    this.latest.outflowLPH,
+          temp_c:         this.latest.tempC,
+          timestamp:      ts,
+        });
+
+        set(ref(db, 'monitored_state'), {
+          amda_score:     amda.score,
+          amda_state:     amda.state.label,
+          recommendation: amda.recommendations[0]?.text || '',
+          days_remaining: amda.daysRemaining,
+          trend:          amda.predictions.trend,
+          last_updated:   ts,
+        });
+
+        set(ref(db, 'computed_values'), {
+          time_to_overflow_hr: amda.predictions.timeToOverflowH,
+          time_to_deplete_hr:  amda.predictions.timeToDepleteH,
+          days_remaining:      amda.daysRemaining,
+          last_updated:        ts,
+        });
+
+        console.log('Firebase synced — level: '
+          + this.latest.levelPct + '% AMDA: '
+          + amda.score + ' ' + amda.state.label);
+
+      } catch (err) {
+        console.warn('Firebase write failed:', err.message);
+      }
+    },
+
+    /** Tick the simulation one step (used when live === false) */
+    simulate() {
+      const cap = state.settings.capacity || 5000;
+      const inflow  = randBetween(30, 60);
+      const outflow = randBetween(20, 50);
+      state.waterLevel = Math.max(200, Math.min(cap, state.waterLevel + (inflow - outflow)));
+      this.latest.levelPct   = Math.round((state.waterLevel / cap) * 100);
+      this.latest.inflowLPH  = inflow;
+      this.latest.outflowLPH = outflow;
+      this.latest.ts = Date.now();
+      this._history.push({ ...this.latest, time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) });
+      if (this._history.length > this.MAX_HISTORY) this._history.shift();
+    },
+
+    /** Run AMDA on latest readings, passing full history for context */
+    runAmda() {
+      const cfg = loadFromStorage('amdaConfig', { horizon: 7 });
+      return AMDA.compute({
+        levelPct:    this.latest.levelPct,
+        inflowLPH:   this.latest.inflowLPH  + (this.weatherBonus || 0),
+        outflowLPH:  this.latest.outflowLPH,
+        capacityL:   state.settings.capacity || 5000,
+        history:     this._history,
+        horizonDays: cfg.horizon || 7,
+      });
+    },
+
+    /** Fetch rain forecast via Open-Meteo (free, no key, CORS-ok)
+     *  Updates this.weatherBonus — extra inflow L/hr expected from rain */
+    async fetchWeather(lat, lon) {
+      const cfg = loadFromStorage('amdaConfig', { weather: true, horizon: 7 });
+      if (!cfg.weather) { this.weatherBonus = 0; return; }
+      try {
+        const days = Math.min(16, cfg.horizon || 7);
+        const url  = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=precipitation_sum&forecast_days=${days}&timezone=auto`;
+        const res  = await fetch(url);
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const precip = data.daily?.precipitation_sum || [];
+        /* Average daily rainfall mm → rough inflow L/hr bonus
+           Assume 1mm rain over a 10m² collection area → 10L per mm
+           Spread over 24 hrs → mm * 10 / 24 L/hr extra inflow */
+        const avgMM = precip.slice(0, 3).reduce((s, v) => s + (v || 0), 0) / Math.max(1, Math.min(3, precip.length));
+        this.weatherBonus  = +(avgMM * 10 / 24).toFixed(2);
+        this.weatherSummary = precip.slice(0, 3).map((mm, i) => `Day ${i+1}: ${(mm||0).toFixed(1)}mm`).join(' | ');
+        /* Update UI if element exists */
+        const el = document.getElementById('weatherForecastText');
+        if (el) el.textContent = `☔ Rain forecast: ${this.weatherSummary} → +${this.weatherBonus} L/hr inflow bonus`;
+        const wb = document.getElementById('weatherBonusBadge');
+        if (wb) wb.textContent = '+' + this.weatherBonus + ' L/hr (rain)';
+      } catch (e) {
+        console.warn('Open-Meteo fetch failed:', e.message);
+        this.weatherBonus = 0;
+        const el = document.getElementById('weatherForecastText');
+        if (el) el.textContent = '⚠ Weather forecast unavailable (check internet connection).';
+      }
+    },
+  };
+
+  /* ──────────────────────────────────────────
+     SERIAL MANAGER
+     Web Serial API — connects to ESP32 over USB.
+     ────────────────────────────────────────── */
+  const SerialManager = {
+    port:   null,
+    reader: null,
+    active: false,
+    _buf:   '',
+    _logEl: null,  // textarea for serial monitor
+
+    supported() { return 'serial' in navigator; },
+
+    async connect() {
+      if (!this.supported()) { showToast('Web Serial API not supported. Use Chrome/Edge 89+.'); return; }
+      try {
+        this.port = await navigator.serial.requestPort();
+        await this.port.open({ baudRate: 115200 });
+        this.active = true;
+        this._updateUI(true);
+        /* Mark first flow-rate or water-level sensor device as online */
+        this._syncDeviceStatus('online');
+        showToast('ESP32 connected! Receiving sensor data.');
+        this._readLoop();
+      } catch (err) {
+        if (err.name !== 'NotFoundError') showToast('Connection failed: ' + err.message);
+      }
+    },
+
+    async disconnect() {
+      this.active = false;
+      try {
+        if (this.reader) { await this.reader.cancel(); this.reader = null; }
+        if (this.port)   { await this.port.close();    this.port   = null; }
+      } catch (_) {}
+      SensorHub.live = false;
+      this._syncDeviceStatus('offline');
+      this._updateUI(false);
+      showToast('ESP32 disconnected. Simulation mode active.');
+    },
+
+    /* Update the status of hardware sensor devices in the device list */
+    _syncDeviceStatus(status) {
+      const targets = ['Water Level', 'Flow Rate'];
+      let changed = false;
+      state.devices.forEach(d => {
+        if (targets.includes(d.type)) {
+          d.status  = status;
+          d.lastData = status === 'online' ? new Date().toISOString().slice(0, 16).replace('T', ' ') : d.lastData;
+          changed = true;
+        }
+      });
+      if (changed) {
+        saveToStorage('devices', state.devices);
+        /* Re-render device table if on that page */
+        if (state.currentPage === 'device-mgmt') {
+          if (typeof renderDeviceTable === 'function') renderDeviceTable();
+        }
+      }
+    },
+
+    async _readLoop() {
+      const decoder = new TextDecoder();
+      try {
+        while (this.port && this.port.readable && this.active) {
+          this.reader = this.port.readable.getReader();
+          try {
+            while (true) {
+              const { value, done } = await this.reader.read();
+              if (done) break;
+              this._buf += decoder.decode(value, { stream: true });
+              let nl;
+              while ((nl = this._buf.indexOf('\n')) !== -1) {
+                const line = this._buf.slice(0, nl).trim();
+                this._buf  = this._buf.slice(nl + 1);
+                this._parseLine(line);
+              }
+            }
+          } finally {
+            this.reader.releaseLock();
+          }
+        }
+      } catch (err) {
+        if (this.active) { showToast('Serial error: ' + err.message); this.disconnect(); }
+      }
+    },
+
+    _parseLine(line) {
+      /* Log to serial monitor textarea */
+      if (this._logEl) {
+        /* textContent append — XSS safe */
+        this._logEl.textContent += line + '\n';
+        this._logEl.scrollTop = this._logEl.scrollHeight;
+      }
+      if (!line.startsWith('{')) return; // skip comment lines
+      try {
+        const pkt = JSON.parse(line);
+        /* Validate: all numeric sensor fields must be finite numbers */
+        const safeKeys = ['level', 'inflow', 'outflow', 'temp'];
+        const validated = {};
+        safeKeys.forEach(k => {
+          if (k in pkt && Number.isFinite(pkt[k])) validated[k] = pkt[k];
+        });
+        if ('level' in validated) SensorHub.ingest(validated);
+        this._updatePacketDisplay(pkt);
+      } catch (_) { /* malformed JSON — ignore */ }
+    },
+
+    _updateUI(connected) {
+      const btn     = document.getElementById('serialConnectBtn');
+      const status  = document.getElementById('serialStatus');
+      const indicator = document.getElementById('serialIndicator');
+      if (btn)       { btn.textContent = connected ? 'Disconnect ESP32' : 'Connect ESP32'; }
+      if (status)    { status.textContent = connected ? 'Connected' : 'Disconnected'; }
+      if (indicator) { indicator.className = 'status-badge ' + (connected ? 'normal' : 'inactive'); }
+    },
+
+    _updatePacketDisplay(pkt) {
+      const el = document.getElementById('serialLastPacket');
+      if (el) {
+        /* Use textContent — no HTML injection from serial data */
+        el.textContent = 'Level: ' + (pkt.level ?? '—') + '%  |  '
+          + 'Inflow: ' + (pkt.inflow ?? '—') + ' L/hr  |  '
+          + 'Outflow: ' + (pkt.outflow ?? '—') + ' L/hr  |  '
+          + 'Temp: ' + (pkt.temp ?? '—') + '°C';
+      }
+      /* Update live sensor cards */
+      const liveLevel = document.getElementById('liveLevel');
+      const liveIn    = document.getElementById('liveInflow');
+      const liveOut   = document.getElementById('liveOutflow');
+      if (liveLevel) liveLevel.textContent = (pkt.level ?? '—') + '%';
+      if (liveIn)    liveIn.textContent    = (pkt.inflow  ?? '—') + ' L/hr';
+      if (liveOut)   liveOut.textContent   = (pkt.outflow ?? '—') + ' L/hr';
+    },
+  };
+
+  /* ──────────────────────────────────────────
+     AUTH
+     ────────────────────────────────────────── */
+  function checkAuth() {
+    state.role = sessionStorage.getItem('rg_role');
+    state.user = sessionStorage.getItem('rg_user');
+    if (!state.role) { window.location.href = 'index.html'; return false; }
+    return true;
+  }
+
+  function logout() {
+    sessionStorage.clear();
+    window.location.href = 'index.html';
+  }
+
+  /* ──────────────────────────────────────────
+     ROUTER
+     ────────────────────────────────────────── */
+  function navigate(page) {
+    window.location.hash = page;
+  }
+
+  function handleRoute() {
+    let hash = window.location.hash.replace('#', '') || getDefaultPage();
+    // Validate the page exists
+    if (!$('#page-' + hash)) hash = getDefaultPage();
+    // Access check
+    if (!canAccess(hash)) hash = getDefaultPage();
+
+    state.currentPage = hash;
+    // Hide all sections
+    $$('.page-section').forEach(s => s.classList.add('hidden'));
+    // Show target
+    const target = $('#page-' + hash);
+    if (target) target.classList.remove('hidden');
+    // Update sidebar active
+    $$('#sidebarNav a').forEach(a => {
+      a.classList.toggle('active', a.getAttribute('data-page') === hash);
+    });
+    // Update navbar active
+    $$('#navbarLinks a').forEach(a => {
+      a.classList.toggle('active', a.getAttribute('data-nav') === hash);
+    });
+    // Update bottom nav
+    $$('#bottomNavItems a').forEach(a => {
+      a.classList.toggle('active', a.getAttribute('data-nav') === hash);
+    });
+    // Close mobile sidebar
+    if ($('#sidebar')) $('#sidebar').classList.remove('open');
+    if ($('#sidebarOverlay')) $('#sidebarOverlay').classList.remove('show');
+
+    // Initialise page-specific content
+    initPage(hash);
+  }
+
+  function getDefaultPage() {
+    if (state.role === 'admin') return 'admin-overview';
+    if (state.role === 'lgu') return 'lgu-dashboard';
+    return 'overview';
+  }
+
+  function canAccess(page) {
+    const adminPages = ['admin-overview', 'user-mgmt', 'device-mgmt', 'amda-config', 'sensor-connect'];
+    const lguPages = ['lgu-dashboard'];
+    if (adminPages.includes(page) && state.role !== 'admin') return false;
+    if (lguPages.includes(page) && state.role !== 'lgu') return false;
+    if (state.role === 'lgu' && !lguPages.includes(page) && page !== 'analytics' && page !== 'alerts') return false;
+    return true;
+  }
+
+  /* ──────────────────────────────────────────
+     UI SETUP
+     ────────────────────────────────────────── */
+  function setupUI() {
+    // User info
+    const name = state.user || 'User';
+    $('#navUserName').textContent = name.charAt(0).toUpperCase() + name.slice(1);
+    $('#navUserRole').textContent = state.role;
+    $('#navAvatar').textContent = name.charAt(0).toUpperCase();
+
+    // Role-based sidebar visibility
+    $$('.admin-only').forEach(el => el.classList.toggle('hidden', state.role !== 'admin'));
+    $$('.lgu-only').forEach(el => el.classList.toggle('hidden', state.role !== 'lgu'));
+
+    // Hide settings in navbar for LGU
+    if (state.role === 'lgu') {
+      const settingsLink = document.querySelector('#navbarLinks a[data-nav="settings"]');
+      if (settingsLink) settingsLink.parentElement.classList.add('hidden');
+    }
+
+    // For user role → show user-related items in sidebar, hide admin sidebar items already handled
+    // For LGU → update bottom nav
+    if (state.role === 'lgu') {
+      const bottomItems = $('#bottomNavItems');
+      bottomItems.innerHTML = `
+        <li><a href="#lgu-dashboard" data-nav="lgu-dashboard" class="active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          Home</a></li>
+        <li><a href="#alerts" data-nav="alerts">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+          Alerts</a></li>
+        <li><a href="#analytics" data-nav="analytics">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+          Analytics</a></li>
+      `;
+    }
+
+    // Hamburger
+    $('#hamburgerBtn').addEventListener('click', () => {
+      $('#sidebar').classList.toggle('open');
+      $('#sidebarOverlay').classList.toggle('show');
+    });
+    $('#sidebarOverlay').addEventListener('click', () => {
+      $('#sidebar').classList.remove('open');
+      $('#sidebarOverlay').classList.remove('show');
+    });
+
+    // Logout
+    $('#logoutBtn').addEventListener('click', logout);
+
+    // Sidebar nav clicks
+    $$('#sidebarNav a').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigate(a.getAttribute('data-page'));
+      });
+    });
+
+    // Navbar link clicks
+    $$('#navbarLinks a').forEach(a => {
+      a.addEventListener('click', (e) => {
+        e.preventDefault();
+        navigate(a.getAttribute('data-nav'));
+      });
+    });
+
+    // Bottom nav clicks  
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('#bottomNavItems a');
+      if (link) {
+        e.preventDefault();
+        navigate(link.getAttribute('data-nav'));
+      }
+    });
+
+    // Modal close
+    $('#modalCloseBtn').addEventListener('click', closeModal);
+    $('#modalCancelBtn').addEventListener('click', closeModal);
+    $('#modalBackdrop').addEventListener('click', (e) => {
+      if (e.target === e.currentTarget) closeModal();
+    });
+  }
+
+  /* ──────────────────────────────────────────
+     PAGE-SPECIFIC INIT
+     ────────────────────────────────────────── */
+  let pagesInitialized = {};
+
+  function initPage(page) {
+    switch (page) {
+      case 'overview':
+        if (!pagesInitialized.overview) { initOverviewCharts(); pagesInitialized.overview = true; }
+        updateOverview();
+        break;
+      case 'tank':
+        if (!pagesInitialized.tank) { initTankCharts(); startTankSimulation(); pagesInitialized.tank = true; }
+        break;
+      case 'alerts':
+        renderAlerts();
+        initAlertPrefs();
+        break;
+      case 'analytics':
+        if (!pagesInitialized.analytics) { initAnalyticsCharts(); pagesInitialized.analytics = true; }
+        break;
+      case 'admin-overview':
+        break;
+      case 'user-mgmt':
+        initUserMgmt();
+        break;
+      case 'device-mgmt':
+        initDeviceMgmt();
+        break;
+      case 'settings':
+        initSettings();
+        break;
+      case 'amda-config':
+        initAmdaConfig();
+        break;
+      case 'sensor-connect':
+        initSensorConnect();
+        break;
+      case 'lgu-dashboard':
+        if (!pagesInitialized.lgu) { initLguCharts(); pagesInitialized.lgu = true; }
+        break;
+    }
+  }
+
+  /* ──────────────────────────────────────────
+     OVERVIEW DASHBOARD
+     ────────────────────────────────────────── */
+  function updateOverview() {
+    if (!SensorHub.live) SensorHub.simulate();
+    const cap    = state.settings.capacity || 5000;
+    const pct    = SensorHub.latest.levelPct;
+    const status = getStatus(pct);
+    const amda   = SensorHub.runAmda();
+
+    $('#statWaterLevel').textContent = fmt(state.waterLevel) + ' L';
+    $('#statTankStatus').textContent = status.label;
+    $('#statStatusBadge').className  = 'status-badge ' + status.cls;
+    $('#statStatusBadge').innerHTML  = '<span class="dot"></span>' + sanitizeText(status.label);
+
+    $('#tankWater').style.height  = pct + '%';
+    $('#tankPercent').textContent = pct + '%';
+    $('#tankCapacity').textContent = fmt(cap) + ' L';
+    $('#tankLastUpdated').textContent = (SensorHub.live ? '🟢 Live — ' : '⚙ Simulated — ') + new Date().toLocaleTimeString();
+
+    $('#tankInflow').textContent  = SensorHub.latest.inflowLPH.toFixed(1)  + ' L/hr';
+    $('#tankOutflow').textContent = SensorHub.latest.outflowLPH.toFixed(1) + ' L/hr';
+
+    const tbadge = $('#tankStatusBadge');
+    tbadge.className = 'status-badge ' + status.cls;
+    tbadge.innerHTML = '<span class="dot"></span>' + sanitizeText(status.label);
+
+    /* AMDA overview widgets — score + state */
+    const amdaScore = $('#statAMDA');
+    if (amdaScore) amdaScore.textContent = amda.score + '% — ' + amda.state.icon + ' ' + amda.state.label;
+    const amdaPred = $('#amdaPrediction');
+    if (amdaPred)  amdaPred.textContent  = amda.score + '%';
+    const amdaBar  = $('#amdaProgressBar');
+    if (amdaBar)   amdaBar.style.width   = amda.score + '%';
+
+    /* Predictions summary */
+    const amdaText = $('#amdaInsightText');
+    if (amdaText) {
+      const p = amda.predictions;
+      let summary = amda.state.icon + ' ' + amda.state.label + ' | Days of supply: ~' + amda.daysRemaining + 'd';
+      if (p.timeToOverflowH !== null) summary += ' | Overflow in: ~' + p.timeToOverflowH + 'hr';
+      if (p.timeToDepleteH  !== null) summary += ' | Depletion in: ~' + (p.timeToDepleteH / 24).toFixed(1) + 'd';
+      summary += ' | Trend: ' + p.trend + ' | Consumption: ' + p.consumptionTrend;
+      amdaText.textContent = summary;
+    }
+
+    /* Render actionable recommendations */
+    renderRecommendations('amdaRecommendations', amda.recommendations);
+
+    /* State-change alert — fires from Overview page too */
+    checkAndFireAlert(amda, getStatus(pct));
+
+    /* Auto push-notify on critical / emergency */
+    if (amda.score < 40) pushNotify(amda.state.icon + ' RainGuard ' + amda.state.label, amda.recommendations[0]?.text || '');
+  }
+
+  function getStatus(pct) {
+    const s = state.settings;
+    if (pct >= (s.overflowThreshold || 95)) return { label: 'Overflow', cls: 'overflow' };
+    if (pct <= (s.criticalThreshold || 15)) return { label: 'Critical', cls: 'critical' };
+    if (pct <= (s.lowThreshold || 30)) return { label: 'Low', cls: 'low' };
+    return { label: 'Normal', cls: 'normal' };
+  }
+
+  function initOverviewCharts() {
+    /* ── Daily Usage Chart ──
+       Built from SensorHub history OR fixed weekly baseline.
+       NEVER randomized on interval — refreshes only when new data arrives from sensor. */
+    const ctxDaily = $('#chartDailyUsage');
+    if (ctxDaily) {
+      const dayLabels = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      /* Use last-7-days history if enough data exists, otherwise fixed baseline */
+      const baseline  = [420, 380, 510, 450, 470, 320, 390];
+      state.charts.dailyUsage = new Chart(ctxDaily, {
+        type: 'line',
+        data: {
+          labels: dayLabels,
+          datasets: [{
+            label: 'Usage (L)',
+            data: [...baseline],
+            borderColor: '#1976D2',
+            backgroundColor: 'rgba(25,118,210,.1)',
+            fill: true, tension: .4,
+            pointBackgroundColor: '#1976D2', pointRadius: 4,
+          }]
+        },
+        options: chartOptions('Water Usage (Liters)')
+      });
+    }
+
+    /* ── Weekly Consumption Chart ──
+       Also static — not randomized. */
+    const ctxWeekly = $('#chartWeeklyConsumption');
+    if (ctxWeekly) {
+      state.charts.weeklyConsumption = new Chart(ctxWeekly, {
+        type: 'bar',
+        data: {
+          labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+          datasets: [{
+            label: 'Consumption (L)',
+            data: [2800, 3100, 2650, 2950],
+            backgroundColor: [
+              'rgba(25,118,210,.7)', 'rgba(0,188,212,.7)',
+              'rgba(25,118,210,.7)', 'rgba(0,188,212,.7)'],
+            borderRadius: 6,
+          }]
+        },
+        options: chartOptions('Weekly Consumption (Liters)')
+      });
+    }
+
+    /* ── Overview auto-refresh interval ──
+       Updates: live sensor readings, tank visual, AMDA score.
+       Does NOT touch the daily/weekly charts. */
+    const iv = setInterval(() => {
+      if (state.currentPage === 'overview') {
+        /* Tick simulation ONLY if no real hardware is connected */
+        if (!SensorHub.live) SensorHub.simulate();
+        updateOverview();
+        /* Daily chart: only append a new point when live hardware sends data */
+        if (SensorHub.live && state.charts.dailyUsage) {
+          const now = new Date();
+          const hour = now.getHours();
+          /* Only update at the start of each new hour (first tick after hour boundary) */
+          if (hour !== state._lastChartHour) {
+            state._lastChartHour = hour;
+            const consumed = SensorHub.latest.outflowLPH; // L used in this reading period
+            state.charts.dailyUsage.data.datasets[0].data.push(Math.round(consumed));
+            if (state.charts.dailyUsage.data.datasets[0].data.length > 7)
+              state.charts.dailyUsage.data.datasets[0].data.shift();
+            state.charts.dailyUsage.update('none');
+          }
+        }
+        /* ⚠ Do NOT randomize daily chart in simulation mode */
+      }
+    }, 5000);
+    state.intervals.push(iv);
+    state._lastChartHour = new Date().getHours();
+  }
+
+  /* ──────────────────────────────────────────
+     TANK MONITORING
+     ────────────────────────────────────────── */
+  function initTankCharts() {
+    const ctx = $('#chartTankHistory');
+    if (ctx) {
+      const labels = [];
+      const data = [];
+      for (let i = 24; i >= 0; i--) {
+        const d = new Date(); d.setHours(d.getHours() - i);
+        labels.push(d.getHours() + ':00');
+        data.push(randBetween(2500, 4500));
+      }
+      state.charts.tankHistory = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{
+            label: 'Water Level (L)',
+            data,
+            borderColor: '#1976D2',
+            backgroundColor: 'rgba(25,118,210,.08)',
+            fill: true,
+            tension: .3,
+            pointRadius: 2,
+          }]
+        },
+        options: chartOptions('Water Level (Liters)')
+      });
+    }
+  }
+
+  /* ──────────────────────────────────────────
+     TANK MONITORING REAL-TIME LOOP
+     Updates every 3 seconds. Updates ONLY:
+       - Live sensor readings display
+       - AMDA score + recommendations
+       - Real-time tank level chart (rolling 30-point history)
+     Does NOT randomize historical/daily charts.
+  ────────────────────────────────────────── */
+  function startTankSimulation() {
+    const iv = setInterval(() => {
+      if (state.currentPage !== 'tank') return;
+
+      /* Tick simulation only when no real hardware connected */
+      if (!SensorHub.live) SensorHub.simulate();
+
+      const cap    = state.settings.capacity || 5000;
+      const pct    = SensorHub.latest.levelPct;
+      const inflow = SensorHub.latest.inflowLPH;
+      const outflow= SensorHub.latest.outflowLPH;
+      const net    = inflow - outflow;
+      const status = getStatus(pct);
+      const amda   = SensorHub.runAmda();
+
+      /* ── Simulation mode indicator ── */
+      const modeEl = $('#tmSimMode');
+      if (modeEl) modeEl.textContent = SensorHub.live ? '🟢 Live Sensor Data' : '⚡ Simulation Mode';
+
+      $('#tmWaterLevel').textContent = fmt(state.waterLevel) + ' L';
+      $('#tmCapacity').textContent   = fmt(cap) + ' L';
+      $('#tmInflow').textContent     = inflow.toFixed(1) + ' L/hr';
+      $('#tmOutflow').textContent    = outflow.toFixed(1) + ' L/hr';
+      $('#tmTankWater').style.height = pct + '%';
+      $('#tmTankPercent').textContent= pct + '%';
+      $('#tmFillLevel').textContent  = pct + '%';
+      $('#tmNetFlow').textContent    = (net >= 0 ? '+' : '') + net.toFixed(1) + ' L/hr';
+
+      const timeToFull = net > 0 ? ((cap - state.waterLevel) / Math.max(0.1, net)).toFixed(1) : '∞';
+      $('#tmTimeToFull').textContent = net > 0 ? '~' + timeToFull + ' hrs' : 'N/A';
+
+      const si = $('#tmStatusIndicator');
+      si.className = 'status-badge ' + status.cls;
+      si.innerHTML = '<span class="dot"></span>' + sanitizeText(status.label);
+
+      $('#tmOverflowWarning').classList.toggle('hidden', pct < (state.settings.overflowThreshold || 95));
+
+      /* Real AMDA output */
+      $('#tmAmdaBar').style.width    = amda.score + '%';
+      $('#tmAmdaPercent').textContent = amda.score + '%';
+      const tmText = $('#tmAmdaText');
+      if (tmText) tmText.textContent = amda.state.icon + ' ' + amda.state.label
+        + ' — ' + (amda.recommendations[0]?.text || '') + ' Days remaining: ~' + amda.daysRemaining + 'd.';
+
+      /* Alert on state change (not just threshold) */
+      checkAndFireAlert(amda, status);
+
+      /* Real-time rolling chart — only this chart updates every 3s */
+      if (state.charts.tankHistory) {
+        const d = state.charts.tankHistory.data;
+        d.labels.push(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+        d.datasets[0].data.push(state.waterLevel);
+        if (d.labels.length > 30) { d.labels.shift(); d.datasets[0].data.shift(); }
+        state.charts.tankHistory.update('none');
+      }
+    }, 3000);
+    state.intervals.push(iv);
+  }
+
+  /* ──────────────────────────────────────────
+     STATE-CHANGE ALERT SYSTEM
+     Fires whenever the AMDA state OR tank status changes
+     (e.g. Normal → Low, Low → Critical, anything → Overflow).
+     No score threshold needed — any state change = alert.
+  ────────────────────────────────────────── */
+  let _lastAlertedState = null;  // tracks previous AMDA state label
+  let _lastAlertedStatus = null; // tracks previous tank status label
+  let _alertCooldownMap = {};
+
+  function checkAndFireAlert(amda, status) {
+  const cfg = loadFromStorage('amdaConfig', { autoAlert: true });
+  if (!cfg.autoAlert) return;
+
+    const badStates   = ['Critical', 'Emergency'];
+  const badStatuses = ['Critical', 'Overflow'];
+
+   const isBad = badStates.includes(amda.state.label) 
+             || badStatuses.includes(status.label);
+
+    if (!isBad) {
+      _lastAlertedState  = amda.state.label;
+      _lastAlertedStatus = status.label;
+      return;
+    }
+
+    const stateChanged = amda.state.label !== _lastAlertedState;
+
+    if (!stateChanged) return;
+
+    /* Fire alert on ANY degradation or on Overflow */
+    const stateKey = amda.state.label + '_' + status.label;
+    const now = Date.now();
+    const lastFired = _alertCooldownMap[stateKey] || 0;
+    if (now - lastFired < 600000) return; // 10 min per state
+
+    _lastAlertedState  = amda.state.label;
+    _lastAlertedStatus = status.label;
+
+    _alertCooldownMap[stateKey] = now;
+
+    pushAmdaAlert(amda, status);
+  }
+
+  /* Push an AMDA-generated alert — state-change-based, persisted to localStorage */
+  let _lastAmdaAlert = 0;
+  function pushAmdaAlert(amda, status) {
+    /* Allow same state to re-alert after 5 minutes */
+    const now = Date.now();
+    if (now - _lastAmdaAlert < 300000) return;
+    _lastAmdaAlert = now;
+
+    const statusLabel = status?.label || amda.state.label;
+    const rec = {
+      type:    amda.score < 20 || statusLabel === 'Overflow' ? 'danger' : amda.score < 40 ? 'critical' : 'warning',
+      title:   amda.state.icon + ' ' + statusLabel + ' — AMDA Alert',
+      message: (amda.recommendations[0]?.text || amda.state.label)
+               + ' Score: ' + amda.score + '/100.'
+               + ' Days of supply: ~' + amda.daysRemaining + 'd.'
+               + (amda.predictions?.timeToDepleteH ? ' Depletion in ~' + (amda.predictions.timeToDepleteH/24).toFixed(1) + 'd.' : ''),
+      time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    };
+
+    DEFAULT_ALERTS.unshift(rec);
+    if (DEFAULT_ALERTS.length > 20) DEFAULT_ALERTS.pop();
+    saveToStorage('alerts', DEFAULT_ALERTS);
+
+    /* Re-render alert list immediately if visible */
+    if (state.currentPage === 'alerts') renderAlerts();
+
+    /* Browser push notification */
+    pushNotify(rec.title, rec.message);
+  }
+
+  /* ──────────────────────────────────────────
+     ALERTS
+     ────────────────────────────────────────── */
+  function renderAlerts() {
+    const list = $('#alertList');
+    if (!list) return;
+    const icons = { warning: '⚠️', critical: '🔶', danger: '🔴', info: 'ℹ️' };
+    list.innerHTML = DEFAULT_ALERTS.map(a => `
+      <div class="alert-item ${a.type}">
+        <div class="alert-icon">${icons[a.type] || '📌'}</div>
+        <div class="alert-content">
+          <div class="alert-title">${a.title}</div>
+          <div class="alert-message">${a.message}</div>
+        </div>
+        <div class="alert-time">${a.time}</div>
+      </div>
+    `).join('');
+    $('#alertCount').textContent = DEFAULT_ALERTS.length + ' alerts';
+  }
+
+  /* ─────────────────────────────────────────
+     NOTIFICATIONS
+     Renders recommendations + fires real browser
+     push notifications via the Web Notifications API.
+  ───────────────────────────────────────── */
+  function renderRecommendations(containerId, recs) {
+    const el = document.getElementById(containerId);
+    if (!el || !recs) return;
+    const colourMap = { danger: '#F44336', warning: '#FF9800', info: '#1976D2', success: '#4CAF50' };
+    el.innerHTML = recs.map(r =>
+      `<div style="display:flex;align-items:flex-start;gap:.5rem;padding:.5rem .75rem;
+        background:${colourMap[r.priority] || '#1976D2'}18;
+        border-left:3px solid ${colourMap[r.priority] || '#1976D2'};
+        border-radius:6px;margin:.35rem 0;font-size:.85rem;color:var(--text);">
+        ${sanitizeText(r.text)}</div>`
+    ).join('');
+  }
+
+  /* Fire a real browser push notification (requires permission) */
+  function pushNotify(title, body) {
+    const prefs = loadFromStorage('alertPrefs', { push: false });
+    if (!prefs.push) return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission === 'granted') {
+      new Notification(title, { body, icon: 'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💧</text></svg>' });
+    }
+  }
+
+  function initAlertPrefs() {
+    const prefs = loadFromStorage('alertPrefs', { sms: true, email: true, push: false });
+    $('#prefSMS').checked   = prefs.sms;
+    $('#prefEmail').checked = prefs.email;
+    $('#prefPush').checked  = prefs.push;
+
+    /* Push toggle — request browser permission when enabled */
+    $('#prefPush').addEventListener('change', async function() {
+      if (this.checked && 'Notification' in window && Notification.permission === 'default') {
+        const result = await Notification.requestPermission();
+        if (result !== 'granted') {
+          this.checked = false;
+          showToast('Browser notification permission was denied.');
+        } else {
+          showToast('Push notifications enabled! ✅');
+          new Notification('RainGuard Notifications Active', {
+            body: 'You will receive alerts when AMDA detects critical conditions.',
+          });
+        }
+      } else if (this.checked && 'Notification' in window && Notification.permission === 'denied') {
+        this.checked = false;
+        showToast('Notifications blocked. Enable them in browser site settings.');
+      }
+    });
+
+    /* Warn if notifications not supported */
+    const pushRow = $('#prefPush')?.closest('.toggle-row');
+    if (pushRow && !('Notification' in window)) {
+      const note = document.createElement('small');
+      note.style.color = 'var(--text-muted)';
+      note.textContent = ' (Not supported in this browser)';
+      pushRow.appendChild(note);
+    }
+
+    $('#savePrefsBtn').onclick = () => {
+      saveToStorage('alertPrefs', {
+        sms:   $('#prefSMS').checked,
+        email: $('#prefEmail').checked,
+        push:  $('#prefPush').checked,
+      });
+      showToast('Notification preferences saved!');
+    };
+
+    /* Test notification button */
+    const testBtn = $('#testNotifBtn');
+    if (testBtn) {
+      testBtn.onclick = () => {
+        const prefs2 = loadFromStorage('alertPrefs', { push: false });
+        if (prefs2.push && Notification.permission === 'granted') {
+          pushNotify('💧 RainGuard Test', 'Notifications are working correctly!');
+          showToast('Test notification sent!');
+        } else {
+          showToast('Enable Push Notifications first, then test.');
+        }
+      };
+    }
+  }
+
+  /* ──────────────────────────────────────────
+     ANALYTICS
+     ────────────────────────────────────────── */
+  function initAnalyticsCharts() {
+    // Daily line
+    const c1 = $('#chartAnalyticsDaily');
+    if (c1) {
+      new Chart(c1, {
+        type: 'line',
+        data: {
+          labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+          datasets: [{
+            label: 'Daily Usage (L)',
+            data: [420, 380, 510, 450, 470, 320, 390],
+            borderColor: '#1976D2',
+            backgroundColor: 'rgba(25,118,210,.1)',
+            fill: true, tension: .4, pointRadius: 4,
+          }]
+        },
+        options: chartOptions('Daily Usage (L)')
+      });
+    }
+
+    // Weekly bar
+    const c2 = $('#chartAnalyticsWeekly');
+    if (c2) {
+      new Chart(c2, {
+        type: 'bar',
+        data: {
+          labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+          datasets: [{
+            label: 'Weekly (L)',
+            data: [2800, 3100, 2650, 2950],
+            backgroundColor: 'rgba(25,118,210,.7)',
+            borderRadius: 6,
+          }]
+        },
+        options: chartOptions('Weekly Consumption (L)')
+      });
+    }
+
+    // Monthly bar
+    const c3 = $('#chartAnalyticsMonthly');
+    if (c3) {
+      new Chart(c3, {
+        type: 'bar',
+        data: {
+          labels: ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb'],
+          datasets: [{
+            label: 'Monthly (L)',
+            data: [11200, 12500, 10800, 13200, 11900, 9500],
+            backgroundColor: ['rgba(0,188,212,.6)', 'rgba(25,118,210,.6)', 'rgba(0,188,212,.6)', 'rgba(25,118,210,.6)', 'rgba(0,188,212,.6)', 'rgba(25,118,210,.6)'],
+            borderRadius: 6,
+          }]
+        },
+        options: chartOptions('Monthly Consumption (L)')
+      });
+    }
+
+    // AMDA predictive
+    const c4 = $('#chartAmdaPredictive');
+    if (c4) {
+      new Chart(c4, {
+        type: 'line',
+        data: {
+          labels: ['Day 1', 'Day 2', 'Day 3', 'Day 4', 'Day 5', 'Day 6', 'Day 7'],
+          datasets: [
+            {
+              label: 'Predicted Level (L)',
+              data: [3400, 3250, 3100, 3000, 2850, 2780, 2700],
+              borderColor: '#00BCD4',
+              borderDash: [5, 5],
+              tension: .3,
+              pointRadius: 3,
+            },
+            {
+              label: 'Actual (L)',
+              data: [3400, 3300, 3150, null, null, null, null],
+              borderColor: '#1976D2',
+              tension: .3,
+              pointRadius: 4,
+            }
+          ]
+        },
+        options: chartOptions('Predicted vs Actual (L)')
+      });
+    }
+
+    // CSV download
+    $('#downloadCsvBtn').addEventListener('click', () => {
+      const rows = [
+        ['Date', 'Usage (L)'],
+        ['2026-02-10', '420'],
+        ['2026-02-11', '380'],
+        ['2026-02-12', '510'],
+        ['2026-02-13', '450'],
+        ['2026-02-14', '470'],
+        ['2026-02-15', '320'],
+        ['2026-02-16', '390'],
+      ];
+      const csv = rows.map(r => r.join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = 'rainguard_usage_data.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('CSV downloaded!');
+    });
+  }
+
+  /* ──────────────────────────────────────────
+     USER MANAGEMENT
+     ────────────────────────────────────────── */
+  function initUserMgmt() {
+    state.users = loadFromStorage('users', DEFAULT_USERS);
+    renderUserTable();
+
+    $('#userSearch').addEventListener('input', renderUserTable);
+    $('#userFilterRole').addEventListener('change', renderUserTable);
+    $('#userFilterStatus').addEventListener('change', renderUserTable);
+    $('#addUserBtn').addEventListener('click', () => openUserModal());
+  }
+
+  function renderUserTable() {
+    const search = ($('#userSearch')?.value || '').toLowerCase();
+    const roleFilter = $('#userFilterRole')?.value || '';
+    const statusFilter = $('#userFilterStatus')?.value || '';
+
+    let filtered = state.users.filter(u => {
+      if (search && !u.username.toLowerCase().includes(search) && !u.email.toLowerCase().includes(search)) return false;
+      if (roleFilter && u.role !== roleFilter) return false;
+      if (statusFilter && u.status !== statusFilter) return false;
+      return true;
+    });
+
+    const tbody = $('#userTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = filtered.map(u => `
+      <tr>
+        <td><strong>${u.username}</strong></td>
+        <td>${u.email}</td>
+        <td><span class="status-badge ${u.role === 'admin' ? 'critical' : u.role === 'lgu' ? 'low' : 'normal'}">${u.role}</span></td>
+        <td><span class="status-badge ${u.status}"><span class="dot"></span>${u.status}</span></td>
+        <td class="table-actions">
+          <button class="btn btn-secondary btn-sm" onclick="RainGuard.editUser(${u.id})">Edit</button>
+          <button class="btn ${u.status === 'active' ? 'btn-danger' : 'btn-success'} btn-sm" onclick="RainGuard.toggleUser(${u.id})">${u.status === 'active' ? 'Disable' : 'Enable'}</button>
+        </td>
+      </tr>
+    `).join('');
+  }
+
+  function openUserModal(user) {
+    const isEdit = !!user;
+    $('#modalTitle').textContent = isEdit ? 'Edit User' : 'Add New User';
+    $('#modalBody').innerHTML = `
+      <div class="form-row"><label>Username</label><input type="text" id="mUserName" value="${user?.username || ''}"></div>
+      <div class="form-row"><label>Email</label><input type="email" id="mUserEmail" value="${user?.email || ''}"></div>
+      <div class="form-row"><label>Role</label>
+        <select id="mUserRole">
+          <option value="user" ${user?.role === 'user' ? 'selected' : ''}>User</option>
+          <option value="admin" ${user?.role === 'admin' ? 'selected' : ''}>Admin</option>
+          <option value="lgu" ${user?.role === 'lgu' ? 'selected' : ''}>LGU</option>
+        </select>
+      </div>
+    `;
+    $('#modalSaveBtn').onclick = () => {
+      const name = $('#mUserName').value.trim();
+      const email = $('#mUserEmail').value.trim();
+      const role = $('#mUserRole').value;
+      if (!name || !email) { showToast('Please fill all fields'); return; }
+
+      if (isEdit) {
+        const u = state.users.find(u => u.id === user.id);
+        if (u) { u.username = name; u.email = email; u.role = role; }
+      } else {
+        state.users.push({ id: Date.now(), username: name, email: email, role: role, status: 'active' });
+      }
+      saveToStorage('users', state.users);
+      renderUserTable();
+      closeModal();
+      showToast(isEdit ? 'User updated!' : 'User added!');
+    };
+    openModal();
+  }
+
+  function editUser(id) {
+    const u = state.users.find(u => u.id === id);
+    if (u) openUserModal(u);
+  }
+
+  function toggleUser(id) {
+    const u = state.users.find(u => u.id === id);
+    if (u) {
+      u.status = u.status === 'active' ? 'inactive' : 'active';
+      saveToStorage('users', state.users);
+      renderUserTable();
+      showToast('User ' + (u.status === 'active' ? 'enabled' : 'disabled') + '!');
+    }
+  }
+
+  /* ──────────────────────────────────────────
+     DEVICE MANAGEMENT
+     ────────────────────────────────────────── */
+  function initDeviceMgmt() {
+    state.devices = loadFromStorage('devices', DEFAULT_DEVICES);
+    renderDeviceTable();
+
+    $('#deviceSearch').addEventListener('input', renderDeviceTable);
+    $('#deviceFilterStatus').addEventListener('change', renderDeviceTable);
+    $('#addDeviceBtn').addEventListener('click', () => openDeviceModal());
+  }
+
+  function renderDeviceTable() {
+    const search = ($('#deviceSearch')?.value || '').toLowerCase();
+    const statusFilter = $('#deviceFilterStatus')?.value || '';
+
+    let filtered = state.devices.filter(d => {
+      if (search && !d.id.toLowerCase().includes(search) && !d.type.toLowerCase().includes(search)) return false;
+      if (statusFilter && d.status !== statusFilter) return false;
+      return true;
+    });
+
+    const tbody = $('#deviceTableBody');
+    if (!tbody) return;
+    tbody.innerHTML = filtered.map(d => {
+      const statusCls = d.status === 'online' ? 'active' : d.status === 'offline' ? 'inactive' : 'pending';
+      return `
+        <tr>
+          <td><strong>${d.id}</strong></td>
+          <td>${d.type}</td>
+          <td><span class="status-badge ${statusCls}"><span class="dot"></span>${d.status}</span></td>
+          <td>${d.lastData}</td>
+          <td>${d.calibration}</td>
+          <td>${d.assignedTo}</td>
+          <td class="table-actions">
+            <button class="btn btn-secondary btn-sm" onclick="RainGuard.editDevice('${d.id}')">Edit</button>
+            <button class="btn btn-danger btn-sm" onclick="RainGuard.deleteDevice('${d.id}')">Delete</button>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function openDeviceModal(dev) {
+    const isEdit = !!dev;
+    $('#modalTitle').textContent = isEdit ? 'Edit Device' : 'Add New Device';
+    $('#modalBody').innerHTML = `
+      <div class="form-row"><label>Sensor ID</label><input type="text" id="mDevId" value="${dev?.id || ''}" ${isEdit ? 'readonly style="opacity:.6"' : ''}></div>
+      <div class="form-row"><label>Type</label>
+        <select id="mDevType">
+          <option value="Water Level" ${dev?.type === 'Water Level' ? 'selected' : ''}>Water Level</option>
+          <option value="Flow Rate" ${dev?.type === 'Flow Rate' ? 'selected' : ''}>Flow Rate</option>
+          <option value="Quality" ${dev?.type === 'Quality' ? 'selected' : ''}>Quality</option>
+          <option value="Pressure" ${dev?.type === 'Pressure' ? 'selected' : ''}>Pressure</option>
+        </select>
+      </div>
+      <div class="form-row"><label>Status</label>
+        <select id="mDevStatus">
+          <option value="online" ${dev?.status === 'online' ? 'selected' : ''}>Online</option>
+          <option value="offline" ${dev?.status === 'offline' ? 'selected' : ''}>Offline</option>
+          <option value="maintenance" ${dev?.status === 'maintenance' ? 'selected' : ''}>Maintenance</option>
+        </select>
+      </div>
+      <div class="form-row"><label>Assigned To</label><input type="text" id="mDevAssign" value="${dev?.assignedTo || ''}"></div>
+    `;
+    $('#modalSaveBtn').onclick = () => {
+      const id = $('#mDevId').value.trim();
+      const type = $('#mDevType').value;
+      const status = $('#mDevStatus').value;
+      const assignedTo = $('#mDevAssign').value.trim();
+      if (!id) { showToast('Please provide a Sensor ID'); return; }
+
+      const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+      if (isEdit) {
+        const d = state.devices.find(d => d.id === dev.id);
+        if (d) { d.type = type; d.status = status; d.assignedTo = assignedTo; }
+      } else {
+        state.devices.push({ id, type, status, lastData: now, calibration: now.slice(0, 10), assignedTo });
+      }
+      saveToStorage('devices', state.devices);
+      renderDeviceTable();
+      closeModal();
+      showToast(isEdit ? 'Device updated!' : 'Device added!');
+    };
+    openModal();
+  }
+
+  function editDevice(id) {
+    const d = state.devices.find(d => d.id === id);
+    if (d) openDeviceModal(d);
+  }
+
+  function deleteDevice(id) {
+    if (!confirm('Delete device ' + id + '?')) return;
+    state.devices = state.devices.filter(d => d.id !== id);
+    saveToStorage('devices', state.devices);
+    renderDeviceTable();
+    showToast('Device deleted!');
+  }
+
+  /* ──────────────────────────────────────────
+     SETTINGS
+     ────────────────────────────────────────── */
+  function initSettings() {
+    const s = state.settings;
+    $('#setCapacity').value = s.capacity || 5000;
+    $('#setLow').value = s.lowThreshold || 30;
+    $('#setCritical').value = s.criticalThreshold || 15;
+    $('#setOverflow').value = s.overflowThreshold || 95;
+    $('#setRefresh').value = s.refreshInterval || 5;
+    $('#setAmdaSensitivity').value = s.amdaSensitivity || 'medium';
+    $('#setWeatherApi').checked = s.weatherApi !== false;
+
+    $('#saveSettingsBtn').onclick = () => {
+      state.settings = {
+        capacity: parseInt($('#setCapacity').value) || 5000,
+        lowThreshold: parseInt($('#setLow').value) || 30,
+        criticalThreshold: parseInt($('#setCritical').value) || 15,
+        overflowThreshold: parseInt($('#setOverflow').value) || 95,
+        refreshInterval: parseInt($('#setRefresh').value) || 5,
+        amdaSensitivity: $('#setAmdaSensitivity').value,
+        weatherApi: $('#setWeatherApi').checked,
+      };
+      saveToStorage('settings', state.settings);
+      showToast('Settings saved successfully!');
+    };
+  }
+
+  function initAmdaConfig() {
+    const cfg = loadFromStorage('amdaConfig', {
+      horizon: 7, confidence: '95',
+      weather: true, historical: true, seasonal: true, community: false,
+      autoAlert: true, alertThreshold: 30,
+    });
+
+    /* No model selector — AMDA is the only algorithm */
+    if ($('#amdaHorizon'))   $('#amdaHorizon').value   = cfg.horizon;
+    if ($('#amdaConfidence'))$('#amdaConfidence').value = cfg.confidence;
+    if ($('#amdaWeather'))   $('#amdaWeather').checked  = cfg.weather;
+    if ($('#amdaHistorical'))$('#amdaHistorical').checked = cfg.historical;
+    if ($('#amdaSeasonal'))  $('#amdaSeasonal').checked  = cfg.seasonal;
+    if ($('#amdaCommunity')) $('#amdaCommunity').checked  = cfg.community;
+    if ($('#amdaAutoAlert')) $('#amdaAutoAlert').checked  = cfg.autoAlert;
+    if ($('#amdaAlertThreshold'))$('#amdaAlertThreshold').value = cfg.alertThreshold;
+
+    $('#saveAmdaBtn').onclick = () => {
+      const saved = {
+        horizon:        parseInt($('#amdaHorizon')?.value)   || 7,
+        confidence:     $('#amdaConfidence')?.value          || '95',
+        weather:        $('#amdaWeather')?.checked            ?? true,
+        historical:     $('#amdaHistorical')?.checked         ?? true,
+        seasonal:       $('#amdaSeasonal')?.checked           ?? true,
+        community:      $('#amdaCommunity')?.checked          ?? false,
+        autoAlert:      $('#amdaAutoAlert')?.checked          ?? true,
+        alertThreshold: parseInt($('#amdaAlertThreshold')?.value) || 30,
+      };
+      saveToStorage('amdaConfig', saved);
+      showToast('AMDA configuration saved!');
+    };
+  }
+
+  /* ──────────────────────────────────────────
+     SENSOR CONNECT PAGE
+     ────────────────────────────────────────── */
+  function initSensorConnect() {
+    /* Attach connect/disconnect button */
+    const btn = $('#serialConnectBtn');
+    if (!btn) return;
+    /* Set serial monitor textarea reference */
+    SerialManager._logEl = $('#serialMonitor');
+
+    btn.onclick = async () => {
+      if (SerialManager.active) {
+        await SerialManager.disconnect();
+      } else {
+        await SerialManager.connect();
+      }
+    };
+
+    /* Warn if Web Serial not supported */
+    if (!SerialManager.supported()) {
+      const warn = $('#serialSupportWarn');
+      if (warn) warn.classList.remove('hidden');
+      btn.disabled = true;
+    }
+
+    /* Show current sim values */
+    const liveLevel = $('#liveLevel');
+    const liveIn    = $('#liveInflow');
+    const liveOut   = $('#liveOutflow');
+    if (liveLevel) liveLevel.textContent = SensorHub.latest.levelPct + '%';
+    if (liveIn)    liveIn.textContent    = SensorHub.latest.inflowLPH.toFixed(1)  + ' L/hr';
+    if (liveOut)   liveOut.textContent   = SensorHub.latest.outflowLPH.toFixed(1) + ' L/hr';
+
+    /* Tab switching */
+    $$('.sc-tab-btn').forEach(tb => {
+      tb.addEventListener('click', () => {
+        $$('.sc-tab-btn').forEach(b => b.classList.remove('active'));
+        $$('.sc-tab-pane').forEach(p => p.classList.add('hidden'));
+        tb.classList.add('active');
+        const pane = $('#sc-pane-' + tb.dataset.tab);
+        if (pane) pane.classList.remove('hidden');
+      });
+    });
+
+    /* Clear serial monitor */
+    const clearBtn = $('#serialClearBtn');
+    if (clearBtn) clearBtn.onclick = () => {
+      if (SerialManager._logEl) SerialManager._logEl.textContent = '';
+    };
+  }
+
+  /* ──────────────────────────────────────────
+     LGU DASHBOARD
+     ────────────────────────────────────────── */
+  function initLguCharts() {
+    const c1 = $('#chartLguRegional');
+    if (c1) {
+      new Chart(c1, {
+        type: 'bar',
+        data: {
+          labels: ['Brgy. A', 'Brgy. B', 'Brgy. C', 'Brgy. D', 'Brgy. E'],
+          datasets: [{
+            label: 'Water Usage (L)',
+            data: [18500, 22000, 15200, 19800, 16700],
+            backgroundColor: [
+              'rgba(25,118,210,.7)', 'rgba(0,188,212,.7)', 'rgba(25,118,210,.7)',
+              'rgba(0,188,212,.7)', 'rgba(25,118,210,.7)'
+            ],
+            borderRadius: 6,
+          }]
+        },
+        options: chartOptions('Regional Water Usage (L)')
+      });
+    }
+
+    const c2 = $('#chartLguAggregated');
+    if (c2) {
+      new Chart(c2, {
+        type: 'line',
+        data: {
+          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+          datasets: [{
+            label: 'Aggregated (L)',
+            data: [92000, 88000, 95000, 85000, 91000, 78000],
+            borderColor: '#1976D2',
+            backgroundColor: 'rgba(25,118,210,.08)',
+            fill: true,
+            tension: .4,
+            pointRadius: 4,
+          }]
+        },
+        options: chartOptions('Aggregated Consumption (L)')
+      });
+    }
+  }
+
+  /* ──────────────────────────────────────────
+     MODAL
+     ────────────────────────────────────────── */
+  function openModal() { $('#modalBackdrop').classList.remove('hidden'); }
+  function closeModal() { $('#modalBackdrop').classList.add('hidden'); }
+
+  /* ──────────────────────────────────────────
+     CHART UTIL
+     ────────────────────────────────────────── */
+  function chartOptions(yTitle) {
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: true, position: 'top', labels: { usePointStyle: true, padding: 16, font: { family: 'Inter', size: 12 } } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { family: 'Inter', size: 11 } } },
+        y: { beginAtZero: true, title: { display: true, text: yTitle, font: { family: 'Inter', size: 12 } }, grid: { color: 'rgba(0,0,0,.05)' }, ticks: { font: { family: 'Inter', size: 11 } } }
+      }
+    };
+  }
+
+  /* ──────────────────────────────────────────
+     INIT
+     ────────────────────────────────────────── */
+  function init() {
+    if (!checkAuth()) return;
+
+    state.settings = loadFromStorage('settings', DEFAULT_SETTINGS);
+    state.waterLevel = 3400;
+
+    setupUI();
+    handleRoute();
+    window.addEventListener('hashchange', handleRoute);
+
+    /* Fetch weather forecast using browser Geolocation if available,
+       falling back to Metro Manila, Philippines (14.5995°N, 120.9842°E) */
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => SensorHub.fetchWeather(pos.coords.latitude, pos.coords.longitude),
+        ()  => SensorHub.fetchWeather(14.5995, 120.9842)  // fallback: Manila
+      );
+    } else {
+      SensorHub.fetchWeather(14.5995, 120.9842);
+    }
+  }
+
+  // Boot
+  document.addEventListener('DOMContentLoaded', init);
+
+  // Public API (for inline onclick handlers)
+  return {
+    navigate,
+    editUser,
+    toggleUser,
+    editDevice,
+    deleteDevice,
+    connectSerial:    () => SerialManager.connect(),
+    disconnectSerial: () => SerialManager.disconnect(),
+  };
+})();
