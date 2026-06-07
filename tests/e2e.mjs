@@ -82,6 +82,7 @@ try {
     check('landing has NO login form (moved to login.html)', (await page.locator('#loginForm').count()) === 0);
     await page.goto(`${ORIGIN}/register.html`, { waitUntil: 'networkidle' });
     check('register page has signup form', (await page.locator('#registerForm').count()) > 0);
+    check('register page has Back-to-Login button', (await page.locator('a.back-link[href="login.html"]').count()) > 0);
     await page.goto(`${ORIGIN}/reset.html`, { waitUntil: 'networkidle' });
     check('reset page has password form', (await page.locator('#resetForm').count()) > 0);
     await ctx.close();
