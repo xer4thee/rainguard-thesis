@@ -128,12 +128,20 @@ try {
       return error ? error.message : 'ok';
     });
     check('admin INSERT reading allowed (RLS)', ins === 'ok', ins);
+
+    // Admin User Management reads real profiles (promote-role UI)
+    await page.evaluate(() => { window.location.hash = 'user-mgmt'; });
+    const profilesLoaded = await page.waitForFunction(() => {
+      const tb = document.querySelector('#userTableBody');
+      return tb && /rainguard\.io/.test(tb.textContent);
+    }, null, { timeout: 8000 }).then(() => true).catch(() => false);
+    check('admin User Mgmt lists real profiles', profilesLoaded);
     await ctx.close();
   }
 
   // ── 4. User: lands on overview, admin UI hidden, RLS denies writes, reads work ──
   {
-    const { ctx, page } = await loginAs(browser, 'user@rainguard.io', 'user123');
+    const { ctx, page, errors } = await loginAs(browser, 'user@rainguard.io', 'user123');
     check('user redirected to dashboard', page.url().includes('dashboard.html'));
     const overviewVisible = await page.evaluate(() => {
       const el = document.querySelector('#page-overview');
@@ -171,6 +179,13 @@ try {
     check('range toggle switches to Week', weekActive);
     check('tank monitoring has LIVE badge', (await page.locator('#tmLiveBadge').count()) > 0);
     check('analytics has Day/Week/Month toggle', (await page.locator('#analyticsRange .range-btn').count()) === 3);
+    // Analytics page renders real-data charts without NEW console errors
+    // (slice from here so the earlier expected 403 from the RLS-denied insert isn't counted)
+    const aBefore = errors.length;
+    await page.evaluate(() => { window.location.hash = 'analytics'; });
+    await page.waitForTimeout(1500);
+    const aErrors = errors.slice(aBefore).filter(e => !/geolocation|permissions policy|favicon/i.test(e));
+    check('analytics charts render without console errors', aErrors.length === 0, aErrors.slice(0, 2).join(' | '));
     await ctx.close();
   }
 

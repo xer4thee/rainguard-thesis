@@ -649,7 +649,12 @@ if (recs.length === 1) { // only disclaimer was added
     const { data: { session } } = await sb.auth.getSession();
     if (!session) { window.location.href = 'login.html'; return false; }
     const { data: profile } = await sb
-      .from('profiles').select('username, role').eq('id', session.user.id).single();
+      .from('profiles').select('username, role, status').eq('id', session.user.id).single();
+    if (profile && profile.status === 'inactive') {
+      await sb.auth.signOut();
+      window.location.href = 'login.html';
+      return false;
+    }
     state.role = profile?.role || 'user';
     state.user = profile?.username || session.user.email;
     return true;
@@ -920,50 +925,64 @@ if (recs.length === 1) { // only disclaimer was added
     return { label: 'Normal', cls: 'normal' };
   }
 
-  /* Load a chart with day/week/month avg-tank-level history from Supabase (Overview + Analytics). */
-  async function loadRangeChart(chart, range) {
-    if (!chart) return;
+  /* Fetch sensor_readings since `sinceMs`, bucketed into `count` buckets of `bucketMs`,
+     returning { labels, data } (avg or sum of `metric` per bucket; null where empty). */
+  async function fetchBuckets({ metric = 'level_percent', sinceMs, bucketMs, count, agg = 'avg', fmtLabel }) {
     const sb = window._supabase;
-    const now = Date.now();
-    let startMs, bucketMs, fmtLabel;
-    if (range === 'week') {
-      startMs = now - 7 * 24 * 3600e3; bucketMs = 24 * 3600e3;
-      fmtLabel = d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
-    } else if (range === 'month') {
-      startMs = now - 30 * 24 * 3600e3; bucketMs = 24 * 3600e3;
-      fmtLabel = d => (d.getMonth() + 1) + '/' + d.getDate();
-    } else { /* day */
-      startMs = now - 24 * 3600e3; bucketMs = 3600e3;
-      fmtLabel = d => String(d.getHours()).padStart(2, '0') + ':00';
-    }
     let rows = [];
     if (sb) {
       try {
         const { data } = await sb.from('sensor_readings')
-          .select('level_percent, recorded_at')
-          .gte('recorded_at', new Date(startMs).toISOString())
+          .select(metric + ', recorded_at')
+          .gte('recorded_at', new Date(sinceMs).toISOString())
           .order('recorded_at', { ascending: true })
-          .limit(2000);
+          .limit(5000);
         rows = data || [];
       } catch (_) { rows = []; }
     }
-    const buckets = new Map();
+    const b = new Map();
     for (const r of rows) {
-      const key = Math.floor((new Date(r.recorded_at).getTime() - startMs) / bucketMs);
-      const b = buckets.get(key) || { sum: 0, n: 0 };
-      b.sum += r.level_percent || 0; b.n++; buckets.set(key, b);
+      const k = Math.floor((new Date(r.recorded_at).getTime() - sinceMs) / bucketMs);
+      const e = b.get(k) || { sum: 0, n: 0 };
+      e.sum += (r[metric] || 0); e.n++; b.set(k, e);
     }
-    const count = Math.max(1, Math.ceil((now - startMs) / bucketMs));
-    const labels = [], dataArr = [];
+    const labels = [], data = [];
     for (let i = 0; i < count; i++) {
-      labels.push(fmtLabel(new Date(startMs + i * bucketMs)));
-      const b = buckets.get(i);
-      dataArr.push(b ? Math.round(b.sum / b.n) : null);
+      labels.push(fmtLabel(new Date(sinceMs + i * bucketMs), i));
+      const e = b.get(i);
+      data.push(e ? (agg === 'sum' ? Math.round(e.sum) : Math.round(e.sum / e.n)) : null);
     }
+    return { labels, data };
+  }
+
+  /* Update an existing chart's first dataset with bucketed Supabase history. */
+  async function loadChartHistory(chart, opts) {
+    if (!chart) return;
+    const { labels, data } = await fetchBuckets(opts);
     chart.data.labels = labels;
-    chart.data.datasets[0].data = dataArr;
-    chart.data.datasets[0].label = 'Avg Tank Level % — ' + range;
+    chart.data.datasets[0].data = data;
+    if (opts.label) chart.data.datasets[0].label = opts.label;
+    chart.data.datasets[0].spanGaps = true;
     chart.update();
+  }
+
+  /* Overview/Analytics Day/Week/Month "Water Usage" (avg tank level %). */
+  async function loadRangeChart(chart, range) {
+    if (!chart) return;
+    const now = Date.now();
+    let sinceMs, bucketMs, fmtLabel;
+    if (range === 'week') {
+      sinceMs = now - 7 * 24 * 3600e3; bucketMs = 24 * 3600e3;
+      fmtLabel = d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()];
+    } else if (range === 'month') {
+      sinceMs = now - 30 * 24 * 3600e3; bucketMs = 24 * 3600e3;
+      fmtLabel = d => (d.getMonth() + 1) + '/' + d.getDate();
+    } else {
+      sinceMs = now - 24 * 3600e3; bucketMs = 3600e3;
+      fmtLabel = d => String(d.getHours()).padStart(2, '0') + ':00';
+    }
+    const count = Math.max(1, Math.ceil((now - sinceMs) / bucketMs));
+    await loadChartHistory(chart, { metric: 'level_percent', sinceMs, bucketMs, count, agg: 'avg', fmtLabel, label: 'Avg Tank Level % — ' + range });
   }
 
   function initOverviewCharts() {
@@ -1010,17 +1029,20 @@ if (recs.length === 1) { // only disclaimer was added
       state.charts.weeklyConsumption = new Chart(ctxWeekly, {
         type: 'bar',
         data: {
-          labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+          labels: [],
           datasets: [{
-            label: 'Consumption (L)',
-            data: [2800, 3100, 2650, 2950],
-            backgroundColor: [
-              'rgba(25,118,210,.7)', 'rgba(0,188,212,.7)',
-              'rgba(25,118,210,.7)', 'rgba(0,188,212,.7)'],
+            label: 'Avg Outflow (L/hr)',
+            data: [],
+            backgroundColor: 'rgba(25,118,210,.7)',
             borderRadius: 6,
           }]
         },
-        options: chartOptions('Weekly Consumption (Liters)')
+        options: chartOptions('Avg Outflow (L/hr)')
+      });
+      loadChartHistory(state.charts.weeklyConsumption, {
+        metric: 'outflow_lph', sinceMs: Date.now() - 6 * 7 * 24 * 3600e3,
+        bucketMs: 7 * 24 * 3600e3, count: 6, agg: 'avg',
+        fmtLabel: (_d, i) => 'W' + (i + 1), label: 'Avg Outflow (L/hr)'
       });
     }
 
@@ -1377,36 +1399,47 @@ if (recs.length === 1) { // only disclaimer was added
     // Weekly bar
     const c2 = $('#chartAnalyticsWeekly');
     if (c2) {
-      new Chart(c2, {
+      state.charts.analyticsWeekly = new Chart(c2, {
         type: 'bar',
         data: {
-          labels: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
+          labels: [],
           datasets: [{
-            label: 'Weekly (L)',
-            data: [2800, 3100, 2650, 2950],
+            label: 'Avg Level % (weekly)',
+            data: [],
             backgroundColor: 'rgba(25,118,210,.7)',
             borderRadius: 6,
           }]
         },
-        options: chartOptions('Weekly Consumption (L)')
+        options: chartOptions('Avg Tank Level (%)')
+      });
+      loadChartHistory(state.charts.analyticsWeekly, {
+        metric: 'level_percent', sinceMs: Date.now() - 6 * 7 * 24 * 3600e3,
+        bucketMs: 7 * 24 * 3600e3, count: 6, agg: 'avg',
+        fmtLabel: (_d, i) => 'W' + (i + 1), label: 'Avg Level % (weekly)'
       });
     }
 
     // Monthly bar
     const c3 = $('#chartAnalyticsMonthly');
     if (c3) {
-      new Chart(c3, {
+      state.charts.analyticsMonthly = new Chart(c3, {
         type: 'bar',
         data: {
-          labels: ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb'],
+          labels: [],
           datasets: [{
-            label: 'Monthly (L)',
-            data: [11200, 12500, 10800, 13200, 11900, 9500],
-            backgroundColor: ['rgba(0,188,212,.6)', 'rgba(25,118,210,.6)', 'rgba(0,188,212,.6)', 'rgba(25,118,210,.6)', 'rgba(0,188,212,.6)', 'rgba(25,118,210,.6)'],
+            label: 'Avg Level % (monthly)',
+            data: [],
+            backgroundColor: 'rgba(0,188,212,.6)',
             borderRadius: 6,
           }]
         },
-        options: chartOptions('Monthly Consumption (L)')
+        options: chartOptions('Avg Tank Level (%)')
+      });
+      loadChartHistory(state.charts.analyticsMonthly, {
+        metric: 'level_percent', sinceMs: Date.now() - 6 * 30 * 24 * 3600e3,
+        bucketMs: 30 * 24 * 3600e3, count: 6, agg: 'avg',
+        fmtLabel: d => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()],
+        label: 'Avg Level % (monthly)'
       });
     }
 
@@ -1465,14 +1498,25 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      USER MANAGEMENT
      ────────────────────────────────────────── */
-  function initUserMgmt() {
-    state.users = loadFromStorage('users', DEFAULT_USERS);
-    renderUserTable();
-
+  async function initUserMgmt() {
+    await loadProfiles();
     $('#userSearch').addEventListener('input', renderUserTable);
     $('#userFilterRole').addEventListener('change', renderUserTable);
     $('#userFilterStatus').addEventListener('change', renderUserTable);
-    $('#addUserBtn').addEventListener('click', () => openUserModal());
+    /* Users self-register via the sign-up page; admins can't create auth users from the browser. */
+    const addBtn = $('#addUserBtn');
+    if (addBtn) { addBtn.textContent = 'Users self-register'; addBtn.disabled = true; addBtn.style.opacity = '.6'; addBtn.style.cursor = 'default'; }
+  }
+
+  /* Load all profiles from Supabase (admin RLS allows reading every row). */
+  async function loadProfiles() {
+    const sb = window._supabase;
+    if (sb) {
+      const { data, error } = await sb.from('profiles')
+        .select('id, username, email, role, status').order('role', { ascending: true });
+      state.users = (!error && data) ? data : [];
+    }
+    renderUserTable();
   }
 
   function renderUserTable() {
@@ -1491,65 +1535,65 @@ if (recs.length === 1) { // only disclaimer was added
     if (!tbody) return;
     tbody.innerHTML = filtered.map(u => `
       <tr>
-        <td><strong>${u.username}</strong></td>
-        <td>${u.email}</td>
-        <td><span class="status-badge ${u.role === 'admin' ? 'critical' : u.role === 'lgu' ? 'low' : 'normal'}">${u.role}</span></td>
-        <td><span class="status-badge ${u.status}"><span class="dot"></span>${u.status}</span></td>
+        <td><strong>${sanitizeText(u.username)}</strong></td>
+        <td>${sanitizeText(u.email)}</td>
+        <td><span class="status-badge ${u.role === 'admin' ? 'critical' : u.role === 'lgu' ? 'low' : 'normal'}">${sanitizeText(u.role)}</span></td>
+        <td><span class="status-badge ${u.status === 'active' ? 'active' : 'inactive'}"><span class="dot"></span>${sanitizeText(u.status)}</span></td>
         <td class="table-actions">
-          <button class="btn btn-secondary btn-sm" onclick="RainGuard.editUser(${u.id})">Edit</button>
-          <button class="btn ${u.status === 'active' ? 'btn-danger' : 'btn-success'} btn-sm" onclick="RainGuard.toggleUser(${u.id})">${u.status === 'active' ? 'Disable' : 'Enable'}</button>
+          <button class="btn btn-secondary btn-sm" onclick="RainGuard.editUser('${u.id}')">Edit</button>
+          <button class="btn ${u.status === 'active' ? 'btn-danger' : 'btn-success'} btn-sm" onclick="RainGuard.toggleUser('${u.id}')">${u.status === 'active' ? 'Disable' : 'Enable'}</button>
         </td>
       </tr>
     `).join('');
   }
 
   function openUserModal(user) {
-    const isEdit = !!user;
-    $('#modalTitle').textContent = isEdit ? 'Edit User' : 'Add New User';
+    if (!user) return; /* "Add" is disabled — users self-register */
+    $('#modalTitle').textContent = 'Edit User Role & Status';
     $('#modalBody').innerHTML = `
-      <div class="form-row"><label>Username</label><input type="text" id="mUserName" value="${user?.username || ''}"></div>
-      <div class="form-row"><label>Email</label><input type="email" id="mUserEmail" value="${user?.email || ''}"></div>
+      <div class="form-row"><label>Username</label><input type="text" value="${sanitizeText(user.username || '')}" readonly style="opacity:.6"></div>
+      <div class="form-row"><label>Email</label><input type="text" value="${sanitizeText(user.email || '')}" readonly style="opacity:.6"></div>
       <div class="form-row"><label>Role</label>
         <select id="mUserRole">
-          <option value="user" ${user?.role === 'user' ? 'selected' : ''}>User</option>
-          <option value="admin" ${user?.role === 'admin' ? 'selected' : ''}>Admin</option>
-          <option value="lgu" ${user?.role === 'lgu' ? 'selected' : ''}>LGU</option>
+          <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
+          <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+          <option value="lgu" ${user.role === 'lgu' ? 'selected' : ''}>LGU</option>
+        </select>
+      </div>
+      <div class="form-row"><label>Status</label>
+        <select id="mUserStatus">
+          <option value="active" ${user.status === 'active' ? 'selected' : ''}>Active</option>
+          <option value="inactive" ${user.status === 'inactive' ? 'selected' : ''}>Inactive</option>
         </select>
       </div>
     `;
-    $('#modalSaveBtn').onclick = () => {
-      const name = $('#mUserName').value.trim();
-      const email = $('#mUserEmail').value.trim();
+    $('#modalSaveBtn').onclick = async () => {
       const role = $('#mUserRole').value;
-      if (!name || !email) { showToast('Please fill all fields'); return; }
-
-      if (isEdit) {
-        const u = state.users.find(u => u.id === user.id);
-        if (u) { u.username = name; u.email = email; u.role = role; }
-      } else {
-        state.users.push({ id: Date.now(), username: name, email: email, role: role, status: 'active' });
-      }
-      saveToStorage('users', state.users);
-      renderUserTable();
+      const status = $('#mUserStatus').value;
+      const sb = window._supabase;
+      const { error } = await sb.from('profiles').update({ role, status }).eq('id', user.id);
+      if (error) { showToast('Update failed: ' + error.message); return; }
+      await loadProfiles();
       closeModal();
-      showToast(isEdit ? 'User updated!' : 'User added!');
+      showToast('User updated!');
     };
     openModal();
   }
 
   function editUser(id) {
-    const u = state.users.find(u => u.id === id);
+    const u = state.users.find(u => String(u.id) === String(id));
     if (u) openUserModal(u);
   }
 
-  function toggleUser(id) {
-    const u = state.users.find(u => u.id === id);
-    if (u) {
-      u.status = u.status === 'active' ? 'inactive' : 'active';
-      saveToStorage('users', state.users);
-      renderUserTable();
-      showToast('User ' + (u.status === 'active' ? 'enabled' : 'disabled') + '!');
-    }
+  async function toggleUser(id) {
+    const u = state.users.find(u => String(u.id) === String(id));
+    if (!u) return;
+    const newStatus = u.status === 'active' ? 'inactive' : 'active';
+    const sb = window._supabase;
+    const { error } = await sb.from('profiles').update({ status: newStatus }).eq('id', u.id);
+    if (error) { showToast('Update failed: ' + error.message); return; }
+    await loadProfiles();
+    showToast('User ' + (newStatus === 'active' ? 'enabled' : 'disabled') + '!');
   }
 
   /* ──────────────────────────────────────────
@@ -1805,33 +1849,36 @@ if (recs.length === 1) { // only disclaimer was added
   function initLguCharts() {
     const c1 = $('#chartLguRegional');
     if (c1) {
-      new Chart(c1, {
+      state.charts.lguRegional = new Chart(c1, {
         type: 'bar',
         data: {
-          labels: ['Brgy. A', 'Brgy. B', 'Brgy. C', 'Brgy. D', 'Brgy. E'],
+          labels: [],
           datasets: [{
-            label: 'Water Usage (L)',
-            data: [18500, 22000, 15200, 19800, 16700],
-            backgroundColor: [
-              'rgba(25,118,210,.7)', 'rgba(0,188,212,.7)', 'rgba(25,118,210,.7)',
-              'rgba(0,188,212,.7)', 'rgba(25,118,210,.7)'
-            ],
+            label: 'Avg Level % (last 7 days)',
+            data: [],
+            backgroundColor: 'rgba(25,118,210,.7)',
             borderRadius: 6,
           }]
         },
-        options: chartOptions('Regional Water Usage (L)')
+        options: chartOptions('Avg Tank Level (%)')
+      });
+      loadChartHistory(state.charts.lguRegional, {
+        metric: 'level_percent', sinceMs: Date.now() - 7 * 24 * 3600e3,
+        bucketMs: 24 * 3600e3, count: 7, agg: 'avg',
+        fmtLabel: d => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getDay()],
+        label: 'Avg Level % (last 7 days)'
       });
     }
 
     const c2 = $('#chartLguAggregated');
     if (c2) {
-      new Chart(c2, {
+      state.charts.lguAggregated = new Chart(c2, {
         type: 'line',
         data: {
-          labels: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun'],
+          labels: [],
           datasets: [{
-            label: 'Aggregated (L)',
-            data: [92000, 88000, 95000, 85000, 91000, 78000],
+            label: 'Avg Level % (monthly)',
+            data: [],
             borderColor: '#1976D2',
             backgroundColor: 'rgba(25,118,210,.08)',
             fill: true,
@@ -1839,7 +1886,13 @@ if (recs.length === 1) { // only disclaimer was added
             pointRadius: 4,
           }]
         },
-        options: chartOptions('Aggregated Consumption (L)')
+        options: chartOptions('Avg Tank Level (%)')
+      });
+      loadChartHistory(state.charts.lguAggregated, {
+        metric: 'level_percent', sinceMs: Date.now() - 6 * 30 * 24 * 3600e3,
+        bucketMs: 30 * 24 * 3600e3, count: 6, agg: 'avg',
+        fmtLabel: d => ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()],
+        label: 'Avg Level % (monthly)'
       });
     }
 
