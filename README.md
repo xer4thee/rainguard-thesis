@@ -78,13 +78,16 @@ Open **Google Chrome** or **Microsoft Edge** and go to:
 http://localhost:8080
 ```
 
-You will see the **RainGuard login page**.
+You will see the **RainGuard landing page**. Click **Log In** to sign in, or **Create an Account** to register a new user.
 
 ---
 
-### Step 5 — Log In
+### Step 5 — Log In or Register
 
-Use one of the demo accounts below:
+From the landing page (`index.html`), click **Log In** (`login.html`) and sign in with email + password,
+or click **Create an Account** (`register.html`) to register. New accounts get the **user** role by default.
+
+Demo accounts:
 
 | Email | Password | Role | Access |
 |---|---|---|---|
@@ -92,7 +95,8 @@ Use one of the demo accounts below:
 | `user@rainguard.io` | `user123` | Regular User | Overview, Tank Monitoring, Alerts, Analytics, Settings |
 | `lgu@rainguard.io` | `lgu123` | LGU Official | LGU Dashboard, Alerts, Analytics |
 
-> 💡 You can click the coloured credential badges on the login page to auto-fill.
+> ℹ️ Registration follows your Supabase **Auth → Confirm email** setting: if it's on, new users must
+> confirm via an emailed link before logging in; turn it off (Supabase dashboard) for instant demo sign-up.
 
 ---
 
@@ -228,7 +232,9 @@ Each state produces **specific actionable recommendations** shown on the dashboa
 
 ```
 RainGuard/
-├── index.html                 ← Login page (Supabase Auth)
+├── index.html                 ← Public landing page (Log In / Register)
+├── login.html                 ← Login (Supabase Auth)
+├── register.html              ← Sign-up (Supabase Auth)
 ├── dashboard.html             ← Main application dashboard
 ├── script.js                  ← AMDA engine, SensorHub, SerialManager, Supabase client
 ├── style.css                  ← Design system and styling
@@ -236,6 +242,7 @@ RainGuard/
 ├── supabase/
 │   └── migrations/
 │       └── 0001_init.sql      ← Postgres schema, RLS, realtime
+├── tests/                     ← Playwright E2E suite + static server
 ├── docs/superpowers/          ← Design spec + implementation plan
 └── README.md                  ← This guide
 ```
