@@ -98,7 +98,13 @@
 
       btn.disabled = true; btn.textContent = 'Creating…';
       const { data, error } = await supabase.auth.signUp({
-        email, password, options: { data: { username, role } }
+        email, password,
+        options: {
+          data: { username, role },
+          /* Confirmation link returns the user to the login page (this origin),
+             so it works on localhost during dev and on the deployed domain alike. */
+          emailRedirectTo: window.location.origin + '/login.html?confirmed=1'
+        }
       });
       btn.disabled = false; btn.textContent = 'Create Account';
 
