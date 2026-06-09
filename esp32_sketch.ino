@@ -1,16 +1,12 @@
 /**
- * RainGuard — ESP32 Sensor Node
- * ==============================
+ * RainGuard — ESP32 Sensor Node (Supabase)
+ * ==========================================
  * Reads:
  *   • HC-SR04 ultrasonic sensor  → water level (cm → percentage)
  *   • YF-S201 flow meter         → inflow rate  (pulses → L/hr)
- *   • Optional second YF-S201   → outflow rate
  *
- * Outputs a JSON packet over USB Serial every 2 seconds:
- *   {"level":68.4,"inflow":42.1,"outflow":31.5,"temp":28.2,"ts":1234567890}
- *
- * The RainGuard web app reads this stream via the Web Serial API
- * and feeds the values directly into the AMDA engine.
+ * Outputs a JSON packet over USB Serial every 2 seconds AND
+ * pushes data to Supabase via HTTPS REST every 10 seconds.
  *
  * ─────────────────────────────────────────────────────────────
  *  WIRING GUIDE
@@ -21,119 +17,93 @@
  *  │  HC-SR04 Pin │ ESP32 Pin                 │
  *  │  VCC         │ 5V  (Vin)                 │
  *  │  GND         │ GND                        │
- *  │  TRIG        │ GPIO 5                     │
- *  │  ECHO        │ GPIO 18  (3.3V safe via    │
- *  │              │ 1kΩ + 2kΩ voltage divider) │
+ *  │  TRIG        │ GPIO 13                    │
+ *  │  ECHO        │ GPIO 12  (via voltage div) │
  *  └──────────────────────────────────────────┘
  *
  *  Voltage divider for ECHO pin (HC-SR04 outputs 5V):
  *    HC-SR04 ECHO ──[1kΩ]──┬──[2kΩ]── GND
- *                           └── GPIO 18 (ESP32)
+ *                           └── GPIO 12 (ESP32)
  *
- *  YF-S201 Flow Meter — INFLOW (Water entering tank)
+ *  YF-S201 Flow Meter — INFLOW
  *  ┌──────────────────────────────────────────┐
  *  │  YF-S201 Wire │ ESP32 Pin                │
  *  │  Red  (VCC)   │ 5V  (Vin)               │
  *  │  Black (GND)  │ GND                      │
- *  │  Yellow (SIG) │ GPIO 14  (+ 10kΩ pull-up │
- *  │               │  to 3.3V recommended)    │
+ *  │  Yellow (SIG) │ GPIO 14 (+ 10kΩ pull-up) │
  *  └──────────────────────────────────────────┘
- *
- *  YF-S201 Flow Meter — OUTFLOW (Water leaving tank) [Optional]
- *  ┌──────────────────────────────────────────┐
- *  │  YF-S201 Wire │ ESP32 Pin                │
- *  │  Red  (VCC)   │ 5V  (Vin)               │
- *  │  Black (GND)  │ GND                      │
- *  │  Yellow (SIG) │ GPIO 27  (+ 10kΩ pull-up)│
- *  └──────────────────────────────────────────┘
- *
- *  DS18B20 Temperature Sensor [Optional — for water quality]
- *  ┌──────────────────────────────────────────┐
- *  │  DS18B20 Pin  │ ESP32 Pin                │
- *  │  VCC          │ 3.3V                     │
- *  │  GND          │ GND                      │
- *  │  DATA         │ GPIO 4  (+ 4.7kΩ pull-up │
- *  │               │  to 3.3V)                │
- *  └──────────────────────────────────────────┘
- *
- *  Required Libraries (install via Arduino Library Manager):
- *    • None for basic operation
- *    • "DallasTemperature" + "OneWire" for DS18B20
  *
  *  Board settings in Arduino IDE:
- *    Board:  "ESP32 Dev Module"
+ *    Board:        ESP32 Dev Module
  *    Upload Speed: 115200
- *    Baud Rate: 115200 (must match Serial.begin below)
+ *    Baud Rate:    115200
  *
+ *  Required libraries: NONE — WiFi, HTTPClient, WiFiClientSecure
+ *  are all built into the ESP32 Arduino core. No library manager
+ *  installs needed.
  * ─────────────────────────────────────────────────────────────
  */
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 
-/* DS18B20 water-temperature sensor.
-   Set ENABLE_DS18B20 to 0 if you don't have the probe or its libraries
-   installed — the sketch then falls back to a fixed placeholder temp and
-   needs no extra libraries. Requires "OneWire" + "DallasTemperature"
-   (install via Arduino Library Manager) when set to 1. */
-#define ENABLE_DS18B20   1
-#if ENABLE_DS18B20
-  #include <OneWire.h>
-  #include <DallasTemperature.h>
-#endif
+/* ─────────────────────────────────────────
+   WiFi credentials
+───────────────────────────────────────── */
+#define WIFI_SSID     "MB_WIFI_2G"
+#define WIFI_PASSWORD "MB@116127"
 
-/* ── Pin Definitions ── */
-#define TRIG_PIN      5     // HC-SR04 trigger
-#define ECHO_PIN      18    // HC-SR04 echo (via voltage divider)
-#define INFLOW_PIN    14    // YF-S201 inflow signal
-#define OUTFLOW_PIN   27    // YF-S201 outflow signal (optional)
-#define TEMP_PIN       4    // DS18B20 data line (+ 4.7kΩ pull-up to 3.3V)
+/* ─────────────────────────────────────────
+   Supabase credentials
+   Project URL + anon/public key
+   (same values used in your web dashboard)
+───────────────────────────────────────── */
+#define SUPABASE_URL "https://zhfehohjkafrcwwqexdy.supabase.co"
+#define SUPABASE_KEY "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU"
 
-/* ── Tank Configuration ── */
-#define TANK_HEIGHT_CM      33   // Physical tank height in cm
-#define SENSOR_OFFSET_CM      3   // Distance from sensor to water surface at 100% fill
+#define ENDPOINT_READINGS SUPABASE_URL "/rest/v1/sensor_readings"
+#define ENDPOINT_STATUS   SUPABASE_URL "/rest/v1/current_status"
 
-/* ── YF-S201 Calibration ── */
-// YF-S201: ~7.5 pulses per second per L/min (factory default)
-// Adjust PULSES_PER_LITER for your specific sensor after calibration
-#define PULSES_PER_LITER   450.0  // pulses per litre (7.5 p/s * 60s = 450 p/min per L/min)
+/* ─────────────────────────────────────────
+   Pin definitions
+───────────────────────────────────────── */
+#define TRIG_PIN         13
+#define ECHO_PIN         12
+#define FLOW_SENSOR_PIN  14
 
-/* ── Diagnostics & Level Filtering ── */
-// DIAG_MODE: when 1, every cycle also prints a "# RAW ..." comment line with the
-// raw pulse counts and distance. These lines start with '#' so the web app's
-// serial parser ignores them — but you can SEE them in the in-app Serial Monitor.
-// Use it to verify flow-meter wiring: run water (or spin the rotor) through each
-// meter and watch inflowPulses / outflowPulses climb. If they stay 0, the problem
-// is wiring/power/sensor — not this code. Set to 0 for production.
-#define DIAG_MODE              1
-// The HC-SR04 is read DISTANCE_SAMPLES times per cycle; timeouts and echoes outside
-// [DIST_MIN_CM, DIST_MAX_CM] are discarded and the median of the rest is used.
-// This kills the spurious "0%" glitch readings caused by single bad echoes.
-#define DISTANCE_SAMPLES       5
-#define DIST_MIN_CM          2.0    // reject echoes closer than this (noise / sensor face)
-#define DIST_MAX_CM         40.0    // reject echoes beyond empty-tank distance + margin
+/* ─────────────────────────────────────────
+   Tank configuration — YOUR PROTOTYPE
+───────────────────────────────────────── */
+#define TANK_HEIGHT_CM   33    // physical height of your tank in cm
+#define SENSOR_OFFSET_CM  3    // sensor-to-water distance at 100% full
 
-/* ── Globals ── */
-volatile unsigned long inflowPulses  = 0;
-volatile unsigned long outflowPulses = 0;
-unsigned long lastReport = 0;
-const unsigned long REPORT_INTERVAL_MS = 2000;
+/* ─────────────────────────────────────────
+   YF-S201 calibration
+───────────────────────────────────────── */
+#define PULSES_PER_LITER 450.0
 
-/* ── DS18B20 temperature ── */
-const float TEMP_FALLBACK_C = 28.0;   // used when no DS18B20 is detected
-#if ENABLE_DS18B20
-OneWire oneWire(TEMP_PIN);
-DallasTemperature tempSensor(&oneWire);
-bool ds18b20Present = false;          // set true in setup() if a probe is found
-#endif
+/* ─────────────────────────────────────────
+   Timing
+───────────────────────────────────────── */
+const unsigned long REPORT_INTERVAL_MS   = 2000;   // serial JSON every 2s
+const unsigned long SUPABASE_INTERVAL_MS = 10000;  // push to Supabase every 10s
 
-/* ── Interrupt Service Routines ── */
-void IRAM_ATTR countInflow()  { inflowPulses++;  }
-void IRAM_ATTR countOutflow() { outflowPulses++; }
+/* ─────────────────────────────────────────
+   Globals
+───────────────────────────────────────── */
+volatile unsigned long inflowPulses = 0;
+unsigned long lastReport   = 0;
+unsigned long lastSupabase = 0;
+
+/* ─────────────────────────────────────────
+   Interrupt service routine
+───────────────────────────────────────── */
+void IRAM_ATTR countInflow() { inflowPulses++; }
 
 /* ─────────────────────────────────────────
    measureDistanceCM()
-   Fires HC-SR04 and returns distance in cm.
-   Returns -1 on timeout.
 ───────────────────────────────────────── */
 float measureDistanceCM() {
   digitalWrite(TRIG_PIN, LOW);
@@ -141,73 +111,37 @@ float measureDistanceCM() {
   digitalWrite(TRIG_PIN, HIGH);
   delayMicroseconds(10);
   digitalWrite(TRIG_PIN, LOW);
-
-  long duration = pulseIn(ECHO_PIN, HIGH, 30000UL); // 30ms timeout
+  long duration = pulseIn(ECHO_PIN, HIGH, 30000UL);
   if (duration == 0) return -1.0;
-  return (duration * 0.0343) / 2.0; // speed of sound = 343 m/s = 0.0343 cm/µs
-}
-
-/* ─────────────────────────────────────────
-   measureDistanceMedian()
-   Takes DISTANCE_SAMPLES readings, discards timeouts and
-   out-of-range echoes, and returns the median of what remains.
-   Returns -1 if no valid sample was obtained (true sensor error).
-   The median rejects the occasional bad echo that otherwise
-   showed up as a spurious 0% reading in the stored data.
-───────────────────────────────────────── */
-float measureDistanceMedian() {
-  float valid[DISTANCE_SAMPLES];
-  int count = 0;
-  for (int i = 0; i < DISTANCE_SAMPLES; i++) {
-    float d = measureDistanceCM();
-    if (d >= DIST_MIN_CM && d <= DIST_MAX_CM) valid[count++] = d;
-    delay(15); // let echoes dissipate between pings
-  }
-  if (count == 0) return -1.0;
-
-  /* insertion sort the valid samples (small array) */
-  for (int i = 1; i < count; i++) {
-    float key = valid[i];
-    int j = i - 1;
-    while (j >= 0 && valid[j] > key) { valid[j + 1] = valid[j]; j--; }
-    valid[j + 1] = key;
-  }
-  return valid[count / 2];
+  return (duration * 0.0343) / 2.0;
 }
 
 /* ─────────────────────────────────────────
    distanceToLevelPct()
-   Converts sensor distance reading to tank
-   fill percentage (0–100%).
 ───────────────────────────────────────── */
 float distanceToLevelPct(float distCM) {
   if (distCM < 0) return -1.0;
-  // Water surface is (distCM) below the sensor.
-  // Empty tank → distance ≈ TANK_HEIGHT_CM
-  // Full  tank → distance ≈ SENSOR_OFFSET_CM
-  float waterDepth = TANK_HEIGHT_CM - distCM;
+  float waterDepth   = TANK_HEIGHT_CM - distCM;
   float usableHeight = TANK_HEIGHT_CM - SENSOR_OFFSET_CM;
-  float pct = (waterDepth / usableHeight) * 100.0;
-  return constrain(pct, 0.0, 100.0);
+  return constrain((waterDepth / usableHeight) * 100.0, 0.0, 100.0);
 }
 
 /* ─────────────────────────────────────────
    pulsesToLitresPerHr()
-   Converts pulse count over interval to L/hr.
 ───────────────────────────────────────── */
 float pulsesToLitresPerHr(unsigned long pulses, float intervalSec) {
   if (intervalSec <= 0) return 0.0;
   float litres = (float)pulses / PULSES_PER_LITER;
-  return (litres / intervalSec) * 3600.0; // convert to per-hour
+  return (litres / intervalSec) * 3600.0;
 }
 
 /* ─────────────────────────────────────────
    buildJsonPacket()
-   Assembles the JSON string for the serial output.
-   Format:
-     {"level":68.4,"inflow":42.1,"outflow":31.5,"temp":28.2,"ts":1234567}
+   Format the dashboard Web Serial parser expects:
+   {"level":45.7,"inflow":0.0,"outflow":0.0,"temp":28.0,"ts":12345}
 ───────────────────────────────────────── */
-String buildJsonPacket(float levelPct, float inflowLPH, float outflowLPH, float tempC) {
+String buildJsonPacket(float levelPct, float inflowLPH,
+                       float outflowLPH, float tempC) {
   String s = "{";
   s += "\"level\":"   + String(levelPct,  1) + ",";
   s += "\"inflow\":"  + String(inflowLPH, 1) + ",";
@@ -218,122 +152,222 @@ String buildJsonPacket(float levelPct, float inflowLPH, float outflowLPH, float 
 }
 
 /* ─────────────────────────────────────────
+   pushToSupabase()
+   Sends data to two Supabase tables:
+     sensor_readings — INSERT (history row)
+     current_status  — UPSERT (latest reading, id=1)
+───────────────────────────────────────── */
+void pushToSupabase(float levelPct, float inflowLPH,
+                    float outflowLPH, float tempC) {
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[Supabase] WiFi not connected — skipping");
+    return;
+  }
+
+  WiFiClientSecure client;
+  client.setInsecure(); // skip SSL cert check — fine for prototype
+
+  /* ── 1. INSERT a new row into sensor_readings ── */
+  {
+    HTTPClient http;
+    http.begin(client, ENDPOINT_READINGS);
+    http.addHeader("Content-Type",  "application/json");
+    http.addHeader("apikey",        SUPABASE_KEY);
+    http.addHeader("Authorization", "Bearer " SUPABASE_KEY);
+    http.addHeader("Prefer",        "return=minimal");
+
+    String body = "{";
+    body += "\"level_pct\":"   + String(levelPct,  1) + ",";
+    body += "\"inflow_lph\":"  + String(inflowLPH, 1) + ",";
+    body += "\"outflow_lph\":" + String(outflowLPH,1) + ",";
+    body += "\"temp_c\":"      + String(tempC,     1);
+    body += "}";
+
+    int code = http.POST(body);
+    if (code == 201) {
+      Serial.println("[Supabase] sensor_readings INSERT OK");
+    } else {
+      Serial.print("[Supabase] sensor_readings error: ");
+      Serial.print(code);
+      Serial.print(" — ");
+      Serial.println(http.getString());
+    }
+    http.end();
+  }
+
+  /* ── 2. UPSERT current_status (always keeps one row, id=1) ── */
+  {
+    HTTPClient http;
+    http.begin(client, ENDPOINT_STATUS);
+    http.addHeader("Content-Type",  "application/json");
+    http.addHeader("apikey",        SUPABASE_KEY);
+    http.addHeader("Authorization", "Bearer " SUPABASE_KEY);
+    http.addHeader("Prefer",        "resolution=merge-duplicates,return=minimal");
+
+    String body = "{";
+    body += "\"id\":1,";
+    body += "\"level_pct\":"   + String(levelPct,  1) + ",";
+    body += "\"inflow_lph\":"  + String(inflowLPH, 1) + ",";
+    body += "\"outflow_lph\":" + String(outflowLPH,1) + ",";
+    body += "\"temp_c\":"      + String(tempC,     1);
+    body += "}";
+
+    int code = http.POST(body);
+    if (code == 200 || code == 201) {
+      Serial.println("[Supabase] current_status UPSERT OK");
+    } else {
+      Serial.print("[Supabase] current_status error: ");
+      Serial.print(code);
+      Serial.print(" — ");
+      Serial.println(http.getString());
+    }
+    http.end();
+  }
+}
+
+/* ─────────────────────────────────────────
    SETUP
 ───────────────────────────────────────── */
 void setup() {
   Serial.begin(115200);
-  while (!Serial) delay(10); // Wait for serial port (needed on some boards)
+  while (!Serial) delay(10);
 
-  /* HC-SR04 */
   pinMode(TRIG_PIN, OUTPUT);
   pinMode(ECHO_PIN, INPUT);
   digitalWrite(TRIG_PIN, LOW);
 
-  /* YF-S201 flow meters — use interrupt-driven pulse counting */
-  pinMode(INFLOW_PIN,  INPUT_PULLUP);
-  pinMode(OUTFLOW_PIN, INPUT_PULLUP);
-  attachInterrupt(digitalPinToInterrupt(INFLOW_PIN),  countInflow,  FALLING);
-  attachInterrupt(digitalPinToInterrupt(OUTFLOW_PIN), countOutflow, FALLING);
+  pinMode(FLOW_SENSOR_PIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(FLOW_SENSOR_PIN), countInflow, FALLING);
 
-  /* DS18B20 temperature probe */
-#if ENABLE_DS18B20
-  tempSensor.begin();
-  ds18b20Present = (tempSensor.getDeviceCount() > 0);
-  if (ds18b20Present) {
-    tempSensor.setResolution(11);              // 11-bit ≈ 0.125°C, ~375ms conversion
-    tempSensor.setWaitForConversion(false);    // non-blocking: read prev value each cycle
-    tempSensor.requestTemperatures();          // kick off the first conversion
-    Serial.println("# DS18B20 detected on GPIO 4.");
-  } else {
-    Serial.println("# DS18B20 NOT found — using fallback temp. Check DATA->GPIO4 + 4.7k pull-up to 3.3V.");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("[WiFi] Connecting");
+  unsigned long wifiStart = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - wifiStart < 15000) {
+    delay(500);
+    Serial.print(".");
   }
-#endif
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\n[WiFi] Connected: " + WiFi.localIP().toString());
+  } else {
+    Serial.println("\n[WiFi] Failed — serial output still works");
+  }
 
-  Serial.println("# RainGuard Sensor Node Ready");
-  Serial.println("# Format: {\"level\":%.1f,\"inflow\":%.1f,\"outflow\":%.1f,\"temp\":%.1f,\"ts\":%lu}");
-#if DIAG_MODE
-  Serial.println("# DIAG_MODE ON — '# RAW ...' lines show raw pulse counts. Run water through each meter and watch the counts. Set DIAG_MODE 0 for production.");
-#endif
-  lastReport = millis();
+  Serial.println("# RainGuard Sensor Node Ready (Supabase)");
+  lastReport   = millis();
+  lastSupabase = millis();
 }
 
 /* ─────────────────────────────────────────
    LOOP
 ───────────────────────────────────────── */
 void loop() {
-  unsigned long now = millis();
+  unsigned long now     = millis();
   unsigned long elapsed = now - lastReport;
 
   if (elapsed >= REPORT_INTERVAL_MS) {
-    /* ── 1. Snapshot and reset pulse counters atomically ── */
+
+    /* 1. Snapshot pulse counter atomically */
     noInterrupts();
-    unsigned long snapInflow  = inflowPulses;  inflowPulses  = 0;
-    unsigned long snapOutflow = outflowPulses; outflowPulses = 0;
+    unsigned long snapInflow = inflowPulses;
+    inflowPulses = 0;
     interrupts();
 
     float intervalSec = elapsed / 1000.0;
 
-    /* ── 2. Water level via ultrasonic (median-filtered, glitch-rejecting) ── */
-    float distCM   = measureDistanceMedian();
+    /* 2. Water level */
+    float distCM   = measureDistanceCM();
     float levelPct = distanceToLevelPct(distCM);
+    Serial.print("[Sensor] Raw distance: ");
+    Serial.print(distCM);
+    Serial.println(" cm");
 
-    /* ── 3. Flow rates ── */
-    float inflowLPH  = pulsesToLitresPerHr(snapInflow,  intervalSec);
-    float outflowLPH = pulsesToLitresPerHr(snapOutflow, intervalSec);
+    /* 3. Flow rates */
+    float inflowLPH  = pulsesToLitresPerHr(snapInflow, intervalSec);
+    float outflowLPH = 0.0;
 
-    /* ── 4. Temperature via DS18B20 (non-blocking: read prior conversion, start next) ── */
-    float tempC = TEMP_FALLBACK_C;
-#if ENABLE_DS18B20
-    if (ds18b20Present) {
-      float t = tempSensor.getTempCByIndex(0);   // result of the conversion started last cycle
-      if (t != DEVICE_DISCONNECTED_C && t > -55.0 && t < 125.0) tempC = t;
-      tempSensor.requestTemperatures();          // kick off next conversion (ready well within 2s)
-    }
-#endif
+    /* 4. Temperature (placeholder — replace with DS18B20 read) */
+    float tempC = 28.0;
 
-    /* ── Diagnostics — raw counts so you can verify flow-meter wiring ── */
-#if DIAG_MODE
-    Serial.print("# RAW  inflowPulses="); Serial.print(snapInflow);
-    Serial.print("  outflowPulses=");     Serial.print(snapOutflow);
-    Serial.print("  distCM=");            Serial.print(distCM, 1);
-    Serial.print("  levelPct=");          Serial.println(levelPct, 1);
-#endif
-
-    /* ── 5. Emit JSON packet ── */
+    /* 5. Emit JSON to Serial (for Web Serial API in dashboard) */
     if (levelPct >= 0) {
       Serial.println(buildJsonPacket(levelPct, inflowLPH, outflowLPH, tempC));
     } else {
-      /* Sensor error — emit error status packet */
-      Serial.println("{\"error\":\"sensor_timeout\",\"ts\":" + String(millis()) + "}");
+      Serial.println("{\"error\":\"sensor_timeout\",\"ts\":"
+                     + String(millis()) + "}");
     }
 
     lastReport = now;
+
+    /* 6. Push to Supabase every 10 seconds */
+    if (now - lastSupabase >= SUPABASE_INTERVAL_MS && levelPct >= 0) {
+      pushToSupabase(levelPct, inflowLPH, outflowLPH, tempC);
+      lastSupabase = now;
+    }
   }
 }
 
 /*
  * ─────────────────────────────────────────────────────────────
+ *  SUPABASE TABLE SETUP — run this SQL in Supabase SQL Editor
+ * ─────────────────────────────────────────────────────────────
+ *
+ * CREATE TABLE sensor_readings (
+ *   id           BIGSERIAL PRIMARY KEY,
+ *   level_pct    NUMERIC(5,2),
+ *   inflow_lph   NUMERIC(8,2),
+ *   outflow_lph  NUMERIC(8,2),
+ *   temp_c       NUMERIC(5,2),
+ *   recorded_at  TIMESTAMPTZ DEFAULT now()
+ * );
+ *
+ * CREATE TABLE current_status (
+ *   id           INT PRIMARY KEY DEFAULT 1,
+ *   level_pct    NUMERIC(5,2),
+ *   inflow_lph   NUMERIC(8,2),
+ *   outflow_lph  NUMERIC(8,2),
+ *   temp_c       NUMERIC(5,2),
+ *   updated_at   TIMESTAMPTZ DEFAULT now()
+ * );
+ *
+ * ALTER TABLE sensor_readings ENABLE ROW LEVEL SECURITY;
+ * ALTER TABLE current_status  ENABLE ROW LEVEL SECURITY;
+ *
+ * CREATE POLICY "esp32 can insert readings"
+ *   ON sensor_readings FOR INSERT TO anon WITH CHECK (true);
+ *
+ * CREATE POLICY "esp32 can upsert status"
+ *   ON current_status FOR ALL TO anon
+ *   USING (true) WITH CHECK (true);
+ *
+ * CREATE POLICY "users can read readings"
+ *   ON sensor_readings FOR SELECT TO authenticated USING (true);
+ *
+ * CREATE POLICY "users can read status"
+ *   ON current_status FOR SELECT TO authenticated USING (true);
+ *
+ * ─────────────────────────────────────────────────────────────
  *  CALIBRATION GUIDE
  * ─────────────────────────────────────────────────────────────
  *
- *  1. HC-SR04 Water Level Calibration:
- *     a) Fill tank to exactly 100% → note distCM value in Serial Monitor
- *        → set SENSOR_OFFSET_CM to that value
- *     b) Empty tank completely → note distCM value
- *        → set TANK_HEIGHT_CM to that value
+ *  1. HC-SR04 Water Level:
+ *     a) Fill tank 100% → note distCM → set SENSOR_OFFSET_CM
+ *     b) Empty tank     → note distCM → set TANK_HEIGHT_CM
+ *     (Your values: TANK_HEIGHT_CM=33, SENSOR_OFFSET_CM=3)
  *
- *  2. YF-S201 Flow Rate Calibration:
- *     a) Pour exactly 1 litre through the sensor
- *     b) Count the pulses printed in the Serial Monitor
+ *  2. YF-S201 Flow Rate:
+ *     a) Pour exactly 1 litre through sensor
+ *     b) Count pulses in Serial Monitor
  *     c) Set PULSES_PER_LITER to that count
- *     Note: Factory default is ~450 pulses/litre but varies ±10%
  *
- *  3. Testing connection to web app:
- *     a) Flash this sketch to your ESP32
- *     b) Open RainGuard dashboard as admin
- *     c) Go to "Sensor Connect" page
- *     d) Click "Connect ESP32" → select the COM port
- *     e) Watch the Serial Monitor in the app update in real time
+ *  3. Testing Supabase:
+ *     Open Serial Monitor → watch for:
+ *       [Supabase] sensor_readings INSERT OK
+ *       [Supabase] current_status UPSERT OK
+ *     Then go to Supabase Dashboard → Table Editor
+ *     → sensor_readings to confirm rows are appearing.
  *
+ *  4. Testing Web Serial (dashboard):
+ *     Dashboard → Sensor Connect → Connect ESP32
+ *     → select COM port → live JSON appears in the app.
  * ─────────────────────────────────────────────────────────────
  */
