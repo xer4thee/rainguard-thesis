@@ -333,9 +333,12 @@
 
             <!-- ────── TANK MONITORING ────── -->
             <section id="page-tank" class="page-section hidden">
-                <div class="page-header">
-                    <h2>Tank Monitoring <span class="live-badge" id="tmLiveBadge"><span class="live-dot"></span>LIVE</span></h2>
-                    <p>Real-time water level and flow data — updates continuously</p>
+                <div class="page-header tank-header">
+                    <div>
+                        <h2>Tank Monitoring <span class="live-badge" id="tmLiveBadge"><span class="live-dot"></span>LIVE</span></h2>
+                        <p>Real-time water level and flow data — updates continuously</p>
+                    </div>
+                    <button class="live-toggle-btn" id="tmPauseBtn" type="button" aria-pressed="false">⏸ Pause Live</button>
                 </div>
 
                 <div class="stats-grid">

@@ -922,6 +922,23 @@ textarea {
 .live-dot { width: 7px; height: 7px; border-radius: 50%; background: #fff; animation: rg-pulse 1.2s ease-in-out infinite; }
 @keyframes rg-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 
+/* Paused state — badge goes grey and the dot stops pulsing */
+.live-badge.paused { background: #90A4AE; }
+.live-badge.paused .live-dot { animation: none; }
+
+/* Pause / Resume Live toggle (Tank Monitoring) */
+.tank-header { display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
+.live-toggle-btn {
+  display: inline-flex; align-items: center; gap: .4rem;
+  font-size: .82rem; font-weight: 600;
+  color: var(--text); background: var(--bg);
+  border: 2px solid var(--border); border-radius: var(--radius-sm);
+  padding: .5rem .9rem; cursor: pointer;
+  transition: border-color var(--transition), background var(--transition), color var(--transition);
+}
+.live-toggle-btn:hover { border-color: var(--primary); color: var(--primary); }
+.live-toggle-btn.paused { border-color: var(--primary); background: var(--primary); color: #fff; }
+
 /* Day / Week / Month range toggle (Overview) */
 .range-toggle { display: inline-flex; gap: .25rem; background: rgba(0,0,0,.05); padding: .2rem; border-radius: 8px; }
 .range-btn { border: none; background: transparent; padding: .3rem .7rem; font-size: .8rem; border-radius: 6px; cursor: pointer; color: var(--text-muted); }
