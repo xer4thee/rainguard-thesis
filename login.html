@@ -22,6 +22,7 @@
       </div>
 
       <form id="loginForm" autocomplete="off">
+        <div id="loginSuccess" class="login-error" style="background:rgba(76,175,80,.12);color:#2E7D32;display:none;"></div>
         <div id="loginError" class="login-error"></div>
 
         <div class="form-group">
@@ -106,6 +107,14 @@
           errEl.textContent = 'Too many failed attempts. Try again in ' + s + 's.';
         }
       }, 500);
+    }
+
+    /* Show a confirmation banner when arriving from a just-confirmed email link */
+    if (new URLSearchParams(window.location.search).get('confirmed') === '1') {
+      const okEl = document.getElementById('loginSuccess');
+      okEl.textContent = '✓ Email confirmed! Please log in.';
+      okEl.style.display = 'block';
+      window.history.replaceState({}, '', 'login.html');
     }
 
     /* Redirect if already logged in */

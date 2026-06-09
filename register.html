@@ -32,6 +32,14 @@
         </div>
 
         <div class="form-group">
+          <label for="role">Account Type</label>
+          <select id="role" required>
+            <option value="user">User</option>
+            <option value="lgu">LGU</option>
+          </select>
+        </div>
+
+        <div class="form-group">
           <label for="email">Email</label>
           <input type="email" id="email" placeholder="Enter your email" required maxlength="64" autocomplete="email">
         </div>
@@ -81,6 +89,8 @@
       const email    = document.getElementById('email').value.trim().toLowerCase().slice(0, 64);
       const password = document.getElementById('password').value;
       const confirm  = document.getElementById('confirm').value;
+      const roleSel  = document.getElementById('role').value;
+      const role     = ['user', 'lgu'].includes(roleSel) ? roleSel : 'user';
 
       if (!username || !email || !password) { errEl.textContent = 'Please fill in all fields.'; return; }
       if (password.length < 6)              { errEl.textContent = 'Password must be at least 6 characters.'; return; }
@@ -88,7 +98,7 @@
 
       btn.disabled = true; btn.textContent = 'Creating…';
       const { data, error } = await supabase.auth.signUp({
-        email, password, options: { data: { username } }
+        email, password, options: { data: { username, role } }
       });
       btn.disabled = false; btn.textContent = 'Create Account';
 
