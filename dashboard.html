@@ -481,6 +481,12 @@
                         <div class="card-header">
                             <div class="card-title">Notification Preferences</div>
                         </div>
+                        <div style="margin-bottom:.75rem;">
+                            <label for="prefPhone" class="toggle-label" style="display:block;margin-bottom:.3rem;">📱 Registered mobile number</label>
+                            <input type="tel" id="prefPhone" placeholder="09XX XXX XXXX" maxlength="20" inputmode="tel"
+                                   style="width:100%;padding:.55rem .65rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;">
+                            <small class="text-muted" style="display:block;margin-top:.25rem;">PH mobile that receives SMS alerts when AMDA detects a Critical/Emergency state.</small>
+                        </div>
                         <div class="toggle-row">
                             <span class="toggle-label">📱 SMS Notifications</span>
                             <label class="toggle"><input type="checkbox" id="prefSMS" checked><span
@@ -729,6 +735,7 @@
                                 <tr>
                                     <th>Username</th>
                                     <th>Email</th>
+                                    <th>Mobile</th>
                                     <th>Role</th>
                                     <th>Status</th>
                                     <th>Actions</th>

@@ -45,6 +45,14 @@
         </div>
 
         <div class="form-group">
+          <label for="phone">Mobile Number</label>
+          <input type="tel" id="phone" placeholder="09XX XXX XXXX" required maxlength="20" autocomplete="tel"
+                 inputmode="tel">
+          <small style="display:block;margin-top:.25rem;font-size:.78rem;color:var(--text-muted);">
+            Philippine mobile — used for SMS alerts when the tank hits a critical level.</small>
+        </div>
+
+        <div class="form-group">
           <label for="password">Password</label>
           <input type="password" id="password" placeholder="At least 6 characters" required minlength="6" maxlength="64" autocomplete="new-password">
         </div>
@@ -77,6 +85,18 @@
     const okEl  = document.getElementById('registerSuccess');
     const btn   = document.getElementById('registerBtn');
 
+    /* Normalise a PH mobile number to E.164 (+639XXXXXXXXX) or return null. */
+    function normalizePHPhone(raw) {
+      if (!raw) return null;
+      const d = String(raw).replace(/[^0-9]/g, '');
+      let n;
+      if (d.length === 11 && d.startsWith('09')) n = '63' + d.slice(1);
+      else if (d.length === 12 && d.startsWith('639')) n = d;
+      else if (d.length === 10 && d.startsWith('9')) n = '63' + d;
+      else return null;
+      return /^639\d{9}$/.test(n) ? '+' + n : null;
+    }
+
     /* Already signed in → go to dashboard */
     const { data: { session } } = await supabase.auth.getSession();
     if (session) window.location.href = 'dashboard.html';
@@ -91,8 +111,10 @@
       const confirm  = document.getElementById('confirm').value;
       const roleSel  = document.getElementById('role').value;
       const role     = ['user', 'lgu'].includes(roleSel) ? roleSel : 'user';
+      const phone    = normalizePHPhone(document.getElementById('phone').value);
 
       if (!username || !email || !password) { errEl.textContent = 'Please fill in all fields.'; return; }
+      if (!phone)                           { errEl.textContent = 'Enter a valid PH mobile number (e.g. 0917 123 4567).'; return; }
       if (password.length < 6)              { errEl.textContent = 'Password must be at least 6 characters.'; return; }
       if (password !== confirm)             { errEl.textContent = 'Passwords do not match.'; return; }
 
@@ -100,7 +122,7 @@
       const { data, error } = await supabase.auth.signUp({
         email, password,
         options: {
-          data: { username, role },
+          data: { username, role, phone },
           /* Confirmation link returns the user to the login page (this origin),
              so it works on localhost during dev and on the deployed domain alike. */
           emailRedirectTo: window.location.origin + '/login.html?confirmed=1'

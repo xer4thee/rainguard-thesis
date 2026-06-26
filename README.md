@@ -193,7 +193,38 @@ Each state produces **specific actionable recommendations** shown on the dashboa
 5. Real alerts fire automatically when AMDA score < 40 (Critical/Emergency)
 
 > ⚠ Push notifications only work in **Google Chrome** or **Microsoft Edge**.
-> SMS and Email toggles are saved but require a backend server to send (out of scope for this prototype).
+
+### SMS Notifications (real, to registered PH numbers)
+
+Critical/Emergency alerts are texted to every user who registered a Philippine mobile
+number and left **SMS Notifications** on. Sending happens **server-side** in a Supabase
+Edge Function (`supabase/functions/send-sms`) — the gateway key never touches the browser.
+The free [**TextBee**](https://textbee.dev) gateway is used: your own Android phone + SIM
+do the sending, so there are no per-message fees (free tier ≈ 300 SMS/month).
+
+**How numbers are collected**
+- New users enter a mobile number at **Register** (required).
+- Anyone can add/change theirs under **Alerts → Notification Preferences → Registered mobile number**.
+- Stored normalised to E.164 (`+639XXXXXXXXX`) in `profiles.phone`; opt-out via the SMS toggle.
+
+**One-time setup**
+1. Install the **TextBee** app on an Android phone, register a device, and copy its
+   **Device ID** + **API key** (textbee.dev dashboard).
+2. Apply the migration: `supabase/migrations/0003_sms.sql` (adds `phone`, `sms_opt_in`,
+   and the `update_my_contact` RPC).
+3. Deploy the function: `supabase functions deploy send-sms`.
+4. Set the secrets (never commit these):
+   ```bash
+   supabase secrets set TEXTBEE_API_KEY=your_key TEXTBEE_DEVICE_ID=your_device_id
+   ```
+5. Keep the Android phone online with the TextBee app running. When AMDA fires a
+   Critical/Emergency alert on the admin (device-connected) browser, the function texts
+   all opted-in numbers.
+
+> The admin browser that's connected to the ESP32 triggers the broadcast. For fully
+> hands-off sending, point a Supabase **Database Webhook** on `alerts` INSERT at the same
+> function instead. Switching gateways (Semaphore/Twilio) is a one-block change in
+> `send-sms/index.ts`.
 
 ---
 

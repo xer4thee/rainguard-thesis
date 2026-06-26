@@ -73,6 +73,25 @@ const RainGuard = (function () {
   }
   function saveToStorage(key, val) { localStorage.setItem('rg_' + key, JSON.stringify(val)); }
 
+  /* PH mobile number helpers (mirror the SQL normalize_ph_phone()). */
+  function normalizePHPhone(raw) {
+    if (!raw) return null;
+    const d = String(raw).replace(/[^0-9]/g, '');
+    let n;
+    if (d.length === 11 && d.startsWith('09')) n = '63' + d.slice(1);
+    else if (d.length === 12 && d.startsWith('639')) n = d;
+    else if (d.length === 10 && d.startsWith('9')) n = '63' + d;
+    else return null;
+    return /^639\d{9}$/.test(n) ? '+' + n : null;
+  }
+  /* +639171234567 → 0917 123 4567 for display. */
+  function formatPHPhone(e164) {
+    const m = /^\+63(9\d{9})$/.exec(e164 || '');
+    if (!m) return e164 || '—';
+    const x = '0' + m[1];
+    return x.slice(0, 4) + ' ' + x.slice(4, 7) + ' ' + x.slice(7);
+  }
+
   function showToast(msg) {
     let t = document.createElement('div');
     t.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1A2138;color:#fff;padding:.7rem 1.5rem;border-radius:8px;font-size:.88rem;z-index:999;box-shadow:0 4px 16px rgba(0,0,0,.2);animation:fadeUp .3s ease';
@@ -1286,6 +1305,16 @@ if (recs.length === 1) { // only disclaimer was added
     if (sb && state.role === 'admin') {
       sb.from('alerts').insert({ type: rec.type, title: rec.title, message: rec.message })
         .then(({ error }) => { if (error) console.warn('alert insert failed:', error.message); });
+
+      /* Critical/emergency → blast SMS to every opted-in registered number.
+         Server-side Edge Function holds the gateway key and looks up recipients. */
+      if (rec.type === 'critical' || rec.type === 'danger') {
+        sb.functions.invoke('send-sms', { body: { type: rec.type, title: rec.title, message: rec.message } })
+          .then(({ data, error }) => {
+            if (error) console.warn('SMS broadcast failed:', error.message);
+            else if (data && typeof data.sent === 'number') console.log(`SMS broadcast: ${data.sent}/${data.total} sent`);
+          });
+      }
     }
 
     /* Browser push notification (immediate, local) */
@@ -1390,46 +1419,78 @@ if (recs.length === 1) { // only disclaimer was added
     }
   }
 
-  function initAlertPrefs() {
-    const prefs = loadFromStorage('alertPrefs', { sms: true, email: true, push: false });
-    $('#prefSMS').checked   = prefs.sms;
+  let _alertPrefsBound = false;
+  async function initAlertPrefs() {
+    /* email/push stay browser-local; the SMS opt-in + phone live in the DB so the
+       server-side Edge Function knows who to text. */
+    const prefs = loadFromStorage('alertPrefs', { email: true, push: false });
     $('#prefEmail').checked = prefs.email;
     $('#prefPush').checked  = prefs.push;
+    $('#prefSMS').checked   = true;
 
-    /* Push toggle — request browser permission when enabled */
-    $('#prefPush').addEventListener('change', async function() {
-      if (this.checked && 'Notification' in window && Notification.permission === 'default') {
-        const result = await Notification.requestPermission();
-        if (result !== 'granted') {
-          this.checked = false;
-          showToast('Browser notification permission was denied.');
-        } else {
-          showToast('Push notifications enabled! ✅');
-          new Notification('RainGuard Notifications Active', {
-            body: 'You will receive alerts when AMDA detects critical conditions.',
-          });
+    /* Load this user's registered number + SMS opt-in from Supabase. */
+    const sb = window._supabase;
+    if (sb) {
+      try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (user) {
+          const { data: prof } = await sb.from('profiles')
+            .select('phone, sms_opt_in').eq('id', user.id).single();
+          if (prof) {
+            if ($('#prefPhone')) $('#prefPhone').value = prof.phone ? formatPHPhone(prof.phone) : '';
+            $('#prefSMS').checked = prof.sms_opt_in !== false;
+          }
         }
-      } else if (this.checked && 'Notification' in window && Notification.permission === 'denied') {
-        this.checked = false;
-        showToast('Notifications blocked. Enable them in browser site settings.');
-      }
-    });
-
-    /* Warn if notifications not supported */
-    const pushRow = $('#prefPush')?.closest('.toggle-row');
-    if (pushRow && !('Notification' in window)) {
-      const note = document.createElement('small');
-      note.style.color = 'var(--text-muted)';
-      note.textContent = ' (Not supported in this browser)';
-      pushRow.appendChild(note);
+      } catch (e) { console.warn('load contact prefs failed:', e?.message || e); }
     }
 
-    $('#savePrefsBtn').onclick = () => {
-      saveToStorage('alertPrefs', {
-        sms:   $('#prefSMS').checked,
-        email: $('#prefEmail').checked,
-        push:  $('#prefPush').checked,
+    if (!_alertPrefsBound) {
+      _alertPrefsBound = true;
+
+      /* Push toggle — request browser permission when enabled */
+      $('#prefPush').addEventListener('change', async function() {
+        if (this.checked && 'Notification' in window && Notification.permission === 'default') {
+          const result = await Notification.requestPermission();
+          if (result !== 'granted') {
+            this.checked = false;
+            showToast('Browser notification permission was denied.');
+          } else {
+            showToast('Push notifications enabled! ✅');
+            new Notification('RainGuard Notifications Active', {
+              body: 'You will receive alerts when AMDA detects critical conditions.',
+            });
+          }
+        } else if (this.checked && 'Notification' in window && Notification.permission === 'denied') {
+          this.checked = false;
+          showToast('Notifications blocked. Enable them in browser site settings.');
+        }
       });
+
+      /* Warn if notifications not supported */
+      const pushRow = $('#prefPush')?.closest('.toggle-row');
+      if (pushRow && !('Notification' in window)) {
+        const note = document.createElement('small');
+        note.style.color = 'var(--text-muted)';
+        note.textContent = ' (Not supported in this browser)';
+        pushRow.appendChild(note);
+      }
+    }
+
+    $('#savePrefsBtn').onclick = async () => {
+      saveToStorage('alertPrefs', { email: $('#prefEmail').checked, push: $('#prefPush').checked });
+
+      const rawPhone = ($('#prefPhone')?.value || '').trim();
+      const smsOptIn = $('#prefSMS').checked;
+      if (rawPhone && !normalizePHPhone(rawPhone)) {
+        showToast('Enter a valid PH mobile number (e.g. 0917 123 4567).');
+        return;
+      }
+      if (sb) {
+        const { data, error } = await sb.rpc('update_my_contact',
+          { p_phone: rawPhone || null, p_sms_opt_in: smsOptIn });
+        if (error) { showToast('Save failed: ' + error.message); return; }
+        if ($('#prefPhone')) $('#prefPhone').value = data ? formatPHPhone(data) : '';
+      }
       showToast('Notification preferences saved!');
     };
 
@@ -1629,7 +1690,7 @@ if (recs.length === 1) { // only disclaimer was added
     const sb = window._supabase;
     if (sb) {
       const { data, error } = await sb.from('profiles')
-        .select('id, username, email, role, status').order('role', { ascending: true });
+        .select('id, username, email, phone, role, status').order('role', { ascending: true });
       state.users = (!error && data) ? data : [];
     }
     renderUserTable();
@@ -1653,6 +1714,7 @@ if (recs.length === 1) { // only disclaimer was added
       <tr>
         <td><strong>${sanitizeText(u.username)}</strong></td>
         <td>${sanitizeText(u.email)}</td>
+        <td>${sanitizeText(u.phone ? formatPHPhone(u.phone) : '—')}</td>
         <td><span class="status-badge ${u.role === 'admin' ? 'critical' : u.role === 'lgu' ? 'low' : 'normal'}">${sanitizeText(u.role)}</span></td>
         <td><span class="status-badge ${u.status === 'active' ? 'active' : 'inactive'}"><span class="dot"></span>${sanitizeText(u.status)}</span></td>
         <td class="table-actions">
