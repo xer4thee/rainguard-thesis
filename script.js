@@ -1879,7 +1879,59 @@ if (recs.length === 1) { // only disclaimer was added
   /* ──────────────────────────────────────────
      SETTINGS
      ────────────────────────────────────────── */
+  /* Account card on the Settings page: show the signed-in account's details +
+     registered mobile number, with an inline Change flow (update_my_contact RPC). */
+  async function initAccountSettings() {
+    if ($('#acctUsername')) $('#acctUsername').value = state.user || '';
+    if ($('#acctRole'))     $('#acctRole').value     = state.role || '';
+
+    const sb = window._supabase;
+    let phone = null, optIn = true;
+    if (sb) {
+      try {
+        const { data: { user } } = await sb.auth.getUser();
+        if (user) {
+          if ($('#acctEmail')) $('#acctEmail').value = user.email || '';
+          const { data: prof } = await sb.from('profiles')
+            .select('username, email, phone, sms_opt_in').eq('id', user.id).single();
+          if (prof) {
+            if ($('#acctUsername')) $('#acctUsername').value = prof.username || state.user || '';
+            if ($('#acctEmail'))    $('#acctEmail').value    = prof.email || user.email || '';
+            phone = prof.phone || null;
+            optIn = prof.sms_opt_in !== false;
+          }
+        }
+      } catch (e) { console.warn('account load failed:', e?.message || e); }
+    }
+
+    const view = $('#acctPhoneView'), edit = $('#acctPhoneEdit');
+    const setText  = () => { if ($('#acctPhoneText')) $('#acctPhoneText').textContent = phone ? formatPHPhone(phone) : 'Not set'; };
+    const showView = () => { if (view) view.style.display = 'flex'; if (edit) edit.style.display = 'none'; };
+    const showEdit = () => {
+      if ($('#acctPhoneInput')) $('#acctPhoneInput').value = phone ? formatPHPhone(phone) : '';
+      if (view) view.style.display = 'none';
+      if (edit) edit.style.display = 'flex';
+      $('#acctPhoneInput')?.focus();
+    };
+    setText(); showView();
+
+    if ($('#acctPhoneChangeBtn')) $('#acctPhoneChangeBtn').onclick = showEdit;
+    if ($('#acctPhoneCancelBtn')) $('#acctPhoneCancelBtn').onclick = showView;
+    if ($('#acctPhoneSaveBtn')) $('#acctPhoneSaveBtn').onclick = async () => {
+      const raw = ($('#acctPhoneInput')?.value || '').trim();
+      if (raw && !normalizePHPhone(raw)) { showToast('Enter a valid PH mobile number (e.g. 0917 123 4567).'); return; }
+      if (!sb) return;
+      /* Preserve the existing SMS opt-in; only the number changes here. */
+      const { data, error } = await sb.rpc('update_my_contact', { p_phone: raw || null, p_sms_opt_in: optIn });
+      if (error) { showToast('Update failed: ' + error.message); return; }
+      phone = data || null;
+      setText(); showView();
+      showToast(phone ? 'Mobile number updated!' : 'Mobile number cleared.');
+    };
+  }
+
   function initSettings() {
+    initAccountSettings();
     const s = state.settings;
     $('#setCapacity').value = s.capacity || 20;
     $('#setLow').value = s.lowThreshold || 30;

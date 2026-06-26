@@ -792,11 +792,41 @@
             <!-- ────── SETTINGS ────── -->
             <section id="page-settings" class="page-section hidden">
                 <div class="page-header">
-                    <h2>Threshold & System Settings</h2>
-                    <p>Configure tank thresholds and system parameters</p>
+                    <h2>Account & Settings</h2>
+                    <p>Your contact details and system parameters</p>
                 </div>
 
                 <div class="settings-grid">
+                    <div class="settings-card" id="accountCard" style="grid-column:1/-1;">
+                        <h3>Account</h3>
+                        <div class="form-row">
+                            <label>Username</label>
+                            <input type="text" id="acctUsername" readonly style="opacity:.7;">
+                        </div>
+                        <div class="form-row">
+                            <label>Email</label>
+                            <input type="text" id="acctEmail" readonly style="opacity:.7;">
+                        </div>
+                        <div class="form-row">
+                            <label>Account Type</label>
+                            <input type="text" id="acctRole" readonly style="opacity:.7;">
+                        </div>
+                        <div class="form-row">
+                            <label>Registered Mobile Number</label>
+                            <div id="acctPhoneView" style="display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;">
+                                <span id="acctPhoneText" style="font-weight:600;">—</span>
+                                <button class="btn btn-secondary btn-sm" id="acctPhoneChangeBtn" style="width:auto;">Change</button>
+                            </div>
+                            <div id="acctPhoneEdit" style="display:none;gap:.5rem;align-items:center;flex-wrap:wrap;margin-top:.4rem;">
+                                <input type="tel" id="acctPhoneInput" placeholder="09XX XXX XXXX" maxlength="20" inputmode="tel"
+                                       style="flex:1;min-width:160px;padding:.5rem .65rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;">
+                                <button class="btn btn-primary btn-sm" id="acctPhoneSaveBtn" style="width:auto;">Save</button>
+                                <button class="btn btn-secondary btn-sm" id="acctPhoneCancelBtn" style="width:auto;">Cancel</button>
+                            </div>
+                            <small class="text-muted" style="display:block;margin-top:.3rem;">Used for SMS alerts when AMDA detects a Critical/Emergency state.</small>
+                        </div>
+                    </div>
+
                     <div class="settings-card">
                         <h3>Tank Configuration</h3>
                         <div class="form-row">
