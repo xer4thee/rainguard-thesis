@@ -726,9 +726,11 @@ if (recs.length === 1) { // only disclaimer was added
   function canAccess(page) {
     const adminPages = ['admin-overview', 'user-mgmt', 'device-mgmt', 'amda-config', 'sensor-connect'];
     const lguPages = ['lgu-dashboard'];
+    /* LGU may also view the shared monitoring + reporting pages (read-only). */
+    const lguAllowed = ['overview', 'tank', 'analytics', 'alerts'];
     if (adminPages.includes(page) && state.role !== 'admin') return false;
     if (lguPages.includes(page) && state.role !== 'lgu') return false;
-    if (state.role === 'lgu' && !lguPages.includes(page) && page !== 'analytics' && page !== 'alerts') return false;
+    if (state.role === 'lgu' && !lguPages.includes(page) && !lguAllowed.includes(page)) return false;
     return true;
   }
 
