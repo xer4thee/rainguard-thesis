@@ -57,6 +57,7 @@ const RainGuard = (function () {
     devices: [],
     charts: {},
     intervals: [],
+    monitoringPaused: false,  // when true, the live auto-refresh loops stop ticking
   };
 
   /* ──────────────────────────────────────────
@@ -1042,7 +1043,7 @@ if (recs.length === 1) { // only disclaimer was added
        Updates: live sensor readings, tank visual, AMDA score.
        Does NOT touch the daily/weekly charts. */
     const iv = setInterval(() => {
-      if (state.currentPage === 'overview') {
+      if (state.currentPage === 'overview' && !state.monitoringPaused) {
         /* Tick simulation ONLY if no real hardware AND no fresh remote data */
         if (!SensorHub.live && !SensorHub.isRemoteFresh()) SensorHub.simulate();
         updateOverview();
@@ -1166,11 +1167,47 @@ if (recs.length === 1) { // only disclaimer was added
 
   function startTankSimulation() {
     renderTankMonitoring(); /* immediate first paint — no ~3s blank */
+    wirePauseToggle();
     const iv = setInterval(() => {
-      if (state.currentPage !== 'tank') return;
+      if (state.currentPage !== 'tank' || state.monitoringPaused) return;
       renderTankMonitoring();
     }, 3000);
     state.intervals.push(iv);
+  }
+
+  /* ── Pause / Resume the live auto-refresh loops (tank + overview) ──
+     Lets the user freeze the dashboard so values stop changing every few seconds. */
+  function applyMonitoringState() {
+    const paused = state.monitoringPaused;
+    const btn   = $('#tmPauseBtn');
+    const badge = $('#tmLiveBadge');
+    if (btn) {
+      btn.textContent = paused ? '▶ Resume Live' : '⏸ Pause Live';
+      btn.classList.toggle('paused', paused);
+      btn.setAttribute('aria-pressed', String(paused));
+    }
+    if (badge) {
+      badge.classList.toggle('paused', paused);
+      badge.innerHTML = '<span class="live-dot"></span>' + (paused ? 'PAUSED' : 'LIVE');
+    }
+    const tmMode = $('#tmSimMode');
+    if (tmMode && paused) tmMode.textContent = '⏸ Paused';
+  }
+
+  function wirePauseToggle() {
+    const btn = $('#tmPauseBtn');
+    if (!btn || btn._wired) return;
+    btn._wired = true;
+    btn.addEventListener('click', () => {
+      state.monitoringPaused = !state.monitoringPaused;
+      applyMonitoringState();
+      /* On resume, refresh immediately so values aren't stale until the next tick */
+      if (!state.monitoringPaused) {
+        renderTankMonitoring();
+        if (state.currentPage === 'overview') updateOverview();
+      }
+    });
+    applyMonitoringState();
   }
 
   /* ──────────────────────────────────────────

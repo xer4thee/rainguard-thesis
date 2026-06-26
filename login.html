@@ -22,6 +22,7 @@
       </div>
 
       <form id="loginForm" autocomplete="off">
+        <div id="loginSuccess" class="login-error" style="background:rgba(76,175,80,.12);color:#2E7D32;display:none;"></div>
         <div id="loginError" class="login-error"></div>
 
         <div class="form-group">
@@ -59,7 +60,9 @@
 
     const supabase = createClient(
       'https://zhfehohjkafrcwwqexdy.supabase.co',
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU'
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU',
+      /* Don't auto-consume confirmation tokens in the URL — the user logs in manually. */
+      { auth: { detectSessionInUrl: false } }
     );
     window._supabase = supabase;
 
@@ -106,6 +109,18 @@
           errEl.textContent = 'Too many failed attempts. Try again in ' + s + 's.';
         }
       }, 500);
+    }
+
+    /* Arriving from a just-confirmed email link (?confirmed=1, or auth tokens in the
+       hash with type=signup): clear any session and prompt a manual login. */
+    const justConfirmed = new URLSearchParams(window.location.search).get('confirmed') === '1'
+      || /[#&]type=signup/.test(window.location.hash);
+    if (justConfirmed) {
+      await supabase.auth.signOut();
+      const okEl = document.getElementById('loginSuccess');
+      okEl.textContent = '✓ Email confirmed! Please log in.';
+      okEl.style.display = 'block';
+      window.history.replaceState({}, '', 'login.html');
     }
 
     /* Redirect if already logged in */

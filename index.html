@@ -50,14 +50,30 @@
 
   <script type="module">
     import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    /* Email-confirmation links redirect back here (the Site URL) with auth tokens in
+       the URL hash and type=signup. Detect that synchronously — before the client can
+       consume the hash — so a freshly-confirmed user is sent to the login page. */
+    const _hash = window.location.hash || '';
+    const _emailConfirmed = /[#&]type=(signup|email)/.test(_hash)
+      || /[?&]type=(signup|email)/.test(window.location.search);
+
     const supabase = createClient(
       'https://zhfehohjkafrcwwqexdy.supabase.co',
-      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU'
+      'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmVob2hqa2FmcmN3d3FleGR5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODA4MzQ5MzUsImV4cCI6MjA5NjQxMDkzNX0.pDXOR0Oqb0h42FliacE14zobu8KUi-xsuBMm-qTzoWU',
+      { auth: { detectSessionInUrl: false } }
     );
     window._supabase = supabase;
-    /* Skip the landing page if already signed in */
-    const { data: { session } } = await supabase.auth.getSession();
-    if (session) window.location.href = 'dashboard.html';
+
+    if (_emailConfirmed) {
+      /* Email is now verified server-side — clear any partial session and go log in. */
+      await supabase.auth.signOut();
+      window.location.replace('login.html?confirmed=1');
+    } else {
+      /* Skip the landing page if already signed in */
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session) window.location.href = 'dashboard.html';
+    }
   </script>
 </body>
 </html>

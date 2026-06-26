@@ -131,22 +131,6 @@ Keyboard interrupt received, exiting.
 
 ---
 
-## Developer Setup (optional — run the tests)
-
-No build step is needed to **run** the app. To run the automated end-to-end suite:
-
-```
-npm install                       # installs Playwright (uses your system Chrome/Edge)
-set SUPABASE_PAT=sbp_xxxxx        # Windows; a Supabase Personal Access Token (for realtime/data checks)
-npm run test:e2e                  # self-hosts a server + headless browser → 35 checks
-```
-
-> `npm run test:e2e` starts its **own** server, so don't run a separate server at the same time.
-> Without `SUPABASE_PAT`, the auth/UI checks still pass; the realtime + seed-dependent checks fail.
-> `npm run serve` (http://localhost:8123) is just an alternative to Python for running the app normally.
-
----
-
 ## Features Overview
 
 | Page | Who Can Access | What It Does |
