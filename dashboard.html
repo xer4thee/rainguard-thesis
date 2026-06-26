@@ -493,6 +493,25 @@
                                     class="toggle-slider"></span></label>
                         </div>
                         <div class="toggle-row">
+                            <span class="toggle-label">⏰ Automatic Tank-Status SMS</span>
+                            <label class="toggle"><input type="checkbox" id="prefAutoSms"><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                        <div id="prefAutoSmsRow" style="display:none;align-items:center;gap:.5rem;flex-wrap:wrap;margin:-.35rem 0 .5rem;padding-left:.25rem;">
+                            <label for="prefAutoSmsHours" style="margin:0;font-size:.85rem;color:var(--text-muted);">Send every</label>
+                            <select id="prefAutoSmsHours" style="width:auto;padding:.4rem .6rem;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);font:inherit;">
+                                <option value="1">1 hour</option>
+                                <option value="2">2 hours</option>
+                                <option value="3">3 hours</option>
+                                <option value="4">4 hours</option>
+                                <option value="6" selected>6 hours</option>
+                                <option value="8">8 hours</option>
+                                <option value="12">12 hours</option>
+                                <option value="24">24 hours</option>
+                            </select>
+                            <small class="text-muted">texts your number the live status while the dashboard is open</small>
+                        </div>
+                        <div class="toggle-row">
                             <span class="toggle-label">📧 Email Notifications</span>
                             <label class="toggle"><input type="checkbox" id="prefEmail" checked><span
                                     class="toggle-slider"></span></label>

@@ -669,6 +669,7 @@ if (recs.length === 1) { // only disclaimer was added
     }
     state.role = profile?.role || 'user';
     state.user = profile?.username || session.user.email;
+    state.phone = profile?.phone || null;
 
     /* Make the number entered at registration reflect on the account: if the signup
        trigger didn't capture it (older account / timing), backfill it once from the
@@ -677,6 +678,7 @@ if (recs.length === 1) { // only disclaimer was added
       const metaPhone = normalizePHPhone(session.user.user_metadata?.phone);
       if (metaPhone && !profile?.phone) {
         await sb.rpc('update_my_contact', { p_phone: metaPhone, p_sms_opt_in: true });
+        state.phone = metaPhone;
       }
     } catch (e) { console.warn('phone backfill skipped:', e?.message || e); }
     return true;
@@ -967,6 +969,32 @@ if (recs.length === 1) { // only disclaimer was added
     if (p.timeToOverflowH != null) msg += ` Overflow in ~${p.timeToOverflowH} hr.`;
     else if (p.timeToDepleteH != null) msg += ` Empty in ~${(p.timeToDepleteH / 24).toFixed(1)}d.`;
     return msg;
+  }
+
+  /* ── Automatic tank-status SMS (per-user, dashboard-open) ──
+     A single background ticker (set up in init) checks every minute whether the chosen
+     interval has elapsed and, if so, texts the user's own number the live tank status.
+     State lives in localStorage ({ enabled, hours, lastSentAt }) so it survives reloads;
+     sending only happens while a dashboard tab is open. */
+  async function autoSendTankStatus() {
+    const sb = window._supabase;
+    if (!sb || !state.phone) return;
+    try {
+      const { data, error } = await sb.functions.invoke('send-sms',
+        { body: { mode: 'self', message: buildTankStatusMessage() } });
+      if (error) console.warn('auto SMS failed:', error.message);
+      else console.log('auto tank-status SMS:', data?.sent ? ('sent to ' + state.phone) : (data?.note || 'no-op'));
+    } catch (e) { console.warn('auto SMS error:', e?.message || e); }
+  }
+
+  function checkAutoSms() {
+    const pref = loadFromStorage('autoSms', { enabled: false, hours: 6, lastSentAt: 0 });
+    if (!pref.enabled || !state.phone) return;
+    const intervalMs = (Number(pref.hours) || 6) * 3600000;
+    if (Date.now() - (pref.lastSentAt || 0) < intervalMs) return;
+    pref.lastSentAt = Date.now();          // stamp before sending so a failure waits a full interval
+    saveToStorage('autoSms', pref);
+    autoSendTankStatus();
   }
 
   /* Fetch sensor_readings since `sinceMs`, bucketed into `count` buckets of `bucketMs`,
@@ -1492,6 +1520,7 @@ if (recs.length === 1) { // only disclaimer was added
           if (prof) {
             if ($('#prefPhone')) $('#prefPhone').value = prof.phone ? formatPHPhone(prof.phone) : '';
             $('#prefSMS').checked = prof.sms_opt_in !== false;
+            state.phone = prof.phone || null;
           }
         }
       } catch (e) { console.warn('load contact prefs failed:', e?.message || e); }
@@ -1543,8 +1572,54 @@ if (recs.length === 1) { // only disclaimer was added
           { p_phone: rawPhone || null, p_sms_opt_in: smsOptIn });
         if (error) { showToast('Save failed: ' + error.message); return; }
         if ($('#prefPhone')) $('#prefPhone').value = data ? formatPHPhone(data) : '';
+        state.phone = data || null;
       }
       showToast('Notification preferences saved!');
+    };
+
+    /* ── Automatic Tank-Status SMS: toggle + interval dropdown ──
+       onchange assignments are idempotent, so re-running initAlertPrefs won't stack them. */
+    const autoPref = loadFromStorage('autoSms', { enabled: false, hours: 6, lastSentAt: 0 });
+    if ($('#prefAutoSms'))      $('#prefAutoSms').checked   = !!autoPref.enabled;
+    if ($('#prefAutoSmsHours')) $('#prefAutoSmsHours').value = String(autoPref.hours || 6);
+    const autoRow = $('#prefAutoSmsRow');
+    const syncAutoRow = () => { if (autoRow) autoRow.style.display = $('#prefAutoSms')?.checked ? 'flex' : 'none'; };
+    syncAutoRow();
+
+    if ($('#prefAutoSms')) $('#prefAutoSms').onchange = async function () {
+      const pref = loadFromStorage('autoSms', { enabled: false, hours: 6, lastSentAt: 0 });
+      if (this.checked) {
+        let num = state.phone;
+        if (!num) {
+          /* no saved number yet — save what's typed before turning automation on */
+          const typed = normalizePHPhone($('#prefPhone')?.value || '');
+          if (!typed) { this.checked = false; syncAutoRow(); showToast('Enter and save a mobile number first.'); return; }
+          if (sb) {
+            const { data, error } = await sb.rpc('update_my_contact', { p_phone: typed, p_sms_opt_in: $('#prefSMS').checked });
+            if (error) { this.checked = false; syncAutoRow(); showToast('Save failed: ' + error.message); return; }
+            state.phone = data || null; num = state.phone;
+            if ($('#prefPhone')) $('#prefPhone').value = num ? formatPHPhone(num) : '';
+          }
+        }
+        pref.enabled = true;
+        pref.hours = Number($('#prefAutoSmsHours')?.value) || 6;
+        pref.lastSentAt = Date.now();          // first auto-send after a full interval
+        saveToStorage('autoSms', pref);
+        showToast(`Automatic SMS on — tank status every ${pref.hours} hr while the dashboard is open.`);
+      } else {
+        pref.enabled = false;
+        saveToStorage('autoSms', pref);
+        showToast('Automatic SMS off.');
+      }
+      syncAutoRow();
+    };
+
+    if ($('#prefAutoSmsHours')) $('#prefAutoSmsHours').onchange = function () {
+      const pref = loadFromStorage('autoSms', { enabled: false, hours: 6, lastSentAt: 0 });
+      pref.hours = Number(this.value) || 6;
+      pref.lastSentAt = Date.now();            // restart the interval from now
+      saveToStorage('autoSms', pref);
+      if (pref.enabled) showToast(`Interval updated — every ${pref.hours} hr.`);
     };
 
     /* Send Test SMS — available to every role (user/LGU/admin) since it only texts
@@ -2003,6 +2078,7 @@ if (recs.length === 1) { // only disclaimer was added
       const { data, error } = await sb.rpc('update_my_contact', { p_phone: raw || null, p_sms_opt_in: optIn });
       if (error) { showToast('Update failed: ' + error.message); return; }
       phone = data || null;
+      state.phone = phone;
       setText(); showView();
       showToast(phone ? 'Mobile number updated!' : 'Mobile number cleared.');
     };
@@ -2276,6 +2352,10 @@ if (recs.length === 1) { // only disclaimer was added
 
     /* Load alerts from Supabase + subscribe to new ones */
     loadAlerts();
+
+    /* Background ticker for automatic tank-status SMS (no-op unless the user enabled it). */
+    checkAutoSms();
+    state.intervals.push(setInterval(checkAutoSms, 60000));
 
     /* Fetch weather forecast using browser Geolocation if available,
        falling back to Metro Manila, Philippines (14.5995°N, 120.9842°E) */
