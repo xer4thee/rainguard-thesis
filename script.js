@@ -949,6 +949,26 @@ if (recs.length === 1) { // only disclaimer was added
     return { label: 'Normal', cls: 'normal' };
   }
 
+  /* Build a concise real-time tank status message for SMS. The send-sms function
+     prefixes "RainGuard", so this omits it. Pulls from the same live sources the
+     Overview dashboard renders (SensorHub.latest + AMDA). */
+  function buildTankStatusMessage() {
+    const cap    = state.settings.capacity || 20;
+    const pct    = Math.round(SensorHub.latest.levelPct ?? 0);
+    const liters = Math.round((pct / 100) * cap);
+    const status = getStatus(pct);
+    const amda   = SensorHub.runAmda();
+    const p      = amda.predictions || {};
+    const time   = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    let msg = `Tank status @ ${time}\n`
+      + `Level ${pct}% (${liters}/${cap} L) — ${status.label}.\n`
+      + `AMDA ${amda.score}/100 (${amda.state.label}).\n`
+      + `In ${SensorHub.latest.inflowLPH.toFixed(1)} L/hr, Out ${SensorHub.latest.outflowLPH.toFixed(1)} L/hr. ~${amda.daysRemaining}d supply.`;
+    if (p.timeToOverflowH != null) msg += ` Overflow in ~${p.timeToOverflowH} hr.`;
+    else if (p.timeToDepleteH != null) msg += ` Empty in ~${(p.timeToDepleteH / 24).toFixed(1)}d.`;
+    return msg;
+  }
+
   /* Fetch sensor_readings since `sinceMs`, bucketed into `count` buckets of `bucketMs`,
      returning { labels, data } (avg or sum of `metric` per bucket; null where empty). */
   async function fetchBuckets({ metric = 'level_percent', sinceMs, bucketMs, count, agg = 'avg', fmtLabel }) {
@@ -1542,14 +1562,14 @@ if (recs.length === 1) { // only disclaimer was added
         const save = await sb.rpc('update_my_contact', { p_phone: normalized, p_sms_opt_in: $('#prefSMS').checked });
         if (!save.error && $('#prefPhone')) $('#prefPhone').value = formatPHPhone(normalized);
         const { data, error } = await sb.functions.invoke('send-sms',
-          { body: { mode: 'self', message: 'Test message from RainGuard ✅ Your number is set up for alerts.' } });
+          { body: { mode: 'self', message: buildTankStatusMessage() } });
         smsTestBtn.disabled = false; smsTestBtn.textContent = label;
         if (error) {
           let msg = error.message;
           try { const b = await error.context?.json?.(); if (b?.error) msg = b.error; } catch (_) {}
           showToast('SMS failed: ' + msg); return;
         }
-        if (data && data.sent > 0) showToast('Test SMS sent to ' + formatPHPhone(normalized) + ' ✅');
+        if (data && data.sent > 0) showToast('Tank status SMS sent to ' + formatPHPhone(normalized) + ' ✅');
         else showToast(data?.note ? ('Not sent: ' + data.note) : 'Could not send — check the function + secrets.');
       };
     }
