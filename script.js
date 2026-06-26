@@ -1311,6 +1311,27 @@ if (recs.length === 1) { // only disclaimer was added
                + (amda.predictions?.timeToDepleteH ? ' Depletion in ~' + (amda.predictions.timeToDepleteH/24).toFixed(1) + 'd.' : ''),
     };
 
+    /* Dedicated SMS body with clear "almost full" / "almost empty" wording. */
+    const pct = Math.round(SensorHub.latest.levelPct ?? 0);
+    const ov  = amda.predictions?.timeToOverflowH;
+    const dep = amda.predictions?.timeToDepleteH;
+    const overflowTh = state.settings?.overflowThreshold || 95;
+    const lowTh      = state.settings?.lowThreshold || 30;
+    const nearFull   = statusLabel === 'Overflow' || pct >= overflowTh || (ov != null && ov < 8);
+    const nearEmpty  = statusLabel === 'Critical' || ['Critical', 'Emergency'].includes(amda.state.label) || pct <= lowTh;
+    let smsMessage;
+    if (nearFull) {
+      smsMessage = `Tank ALMOST FULL at ${pct}%.`
+        + (ov != null ? ` Overflow in ~${ov} hr(s).` : '')
+        + ' Stop rainwater collection or divert the inflow to avoid overflow.';
+    } else if (nearEmpty) {
+      smsMessage = `Tank ALMOST EMPTY at ${pct}%. ~${amda.daysRemaining} day(s) of supply left`
+        + (dep != null ? ` (empty in ~${(dep / 24).toFixed(1)}d).` : '.')
+        + ' Conserve water and arrange a backup supply.';
+    } else {
+      smsMessage = `${statusLabel} — tank at ${pct}%, AMDA score ${amda.score}/100.`;
+    }
+
     /* Only the admin (device-connected) browser writes alerts; the realtime
        subscription in loadAlerts() then updates every viewer's list. */
     const sb = window._supabase;
@@ -1321,7 +1342,7 @@ if (recs.length === 1) { // only disclaimer was added
       /* Critical/emergency → blast SMS to every opted-in registered number.
          Server-side Edge Function holds the gateway key and looks up recipients. */
       if (rec.type === 'critical' || rec.type === 'danger') {
-        sb.functions.invoke('send-sms', { body: { type: rec.type, title: rec.title, message: rec.message } })
+        sb.functions.invoke('send-sms', { body: { type: rec.type, title: rec.title, message: smsMessage } })
           .then(({ data, error }) => {
             if (error) console.warn('SMS broadcast failed:', error.message);
             else if (data && typeof data.sent === 'number') console.log(`SMS broadcast: ${data.sent}/${data.total} sent`);
@@ -1505,6 +1526,33 @@ if (recs.length === 1) { // only disclaimer was added
       }
       showToast('Notification preferences saved!');
     };
+
+    /* Send Test SMS — available to every role (user/LGU/admin) since it only texts
+       the caller's own number (server-side mode:self, no admin check). */
+    const smsTestBtn = $('#prefSendSmsBtn');
+    if (smsTestBtn) {
+      smsTestBtn.onclick = async () => {
+        const raw = ($('#prefPhone')?.value || '').trim();
+        const normalized = normalizePHPhone(raw);
+        if (!raw || !normalized) { showToast('Enter and save a valid PH mobile number first.'); return; }
+        if (!sb) return;
+        const label = smsTestBtn.textContent;
+        smsTestBtn.disabled = true; smsTestBtn.textContent = 'Sending…';
+        /* Persist the shown number first so the test texts exactly what's displayed. */
+        const save = await sb.rpc('update_my_contact', { p_phone: normalized, p_sms_opt_in: $('#prefSMS').checked });
+        if (!save.error && $('#prefPhone')) $('#prefPhone').value = formatPHPhone(normalized);
+        const { data, error } = await sb.functions.invoke('send-sms',
+          { body: { mode: 'self', message: 'Test message from RainGuard ✅ Your number is set up for alerts.' } });
+        smsTestBtn.disabled = false; smsTestBtn.textContent = label;
+        if (error) {
+          let msg = error.message;
+          try { const b = await error.context?.json?.(); if (b?.error) msg = b.error; } catch (_) {}
+          showToast('SMS failed: ' + msg); return;
+        }
+        if (data && data.sent > 0) showToast('Test SMS sent to ' + formatPHPhone(normalized) + ' ✅');
+        else showToast(data?.note ? ('Not sent: ' + data.note) : 'Could not send — check the function + secrets.');
+      };
+    }
 
     /* Test notification button */
     const testBtn = $('#testNotifBtn');
