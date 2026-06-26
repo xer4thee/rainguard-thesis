@@ -661,7 +661,7 @@ if (recs.length === 1) { // only disclaimer was added
     const { data: { session } } = await sb.auth.getSession();
     if (!session) { window.location.href = 'login.html'; return false; }
     const { data: profile } = await sb
-      .from('profiles').select('username, role, status').eq('id', session.user.id).single();
+      .from('profiles').select('username, role, status, phone').eq('id', session.user.id).single();
     if (profile && profile.status === 'inactive') {
       await sb.auth.signOut();
       window.location.href = 'login.html';
@@ -669,6 +669,16 @@ if (recs.length === 1) { // only disclaimer was added
     }
     state.role = profile?.role || 'user';
     state.user = profile?.username || session.user.email;
+
+    /* Make the number entered at registration reflect on the account: if the signup
+       trigger didn't capture it (older account / timing), backfill it once from the
+       auth metadata the user submitted at sign-up. */
+    try {
+      const metaPhone = normalizePHPhone(session.user.user_metadata?.phone);
+      if (metaPhone && !profile?.phone) {
+        await sb.rpc('update_my_contact', { p_phone: metaPhone, p_sms_opt_in: true });
+      }
+    } catch (e) { console.warn('phone backfill skipped:', e?.message || e); }
     return true;
   }
 
@@ -1927,6 +1937,24 @@ if (recs.length === 1) { // only disclaimer was added
       phone = data || null;
       setText(); showView();
       showToast(phone ? 'Mobile number updated!' : 'Mobile number cleared.');
+    };
+
+    /* Send a test SMS to the signed-in account's own number (server-side, mode:self). */
+    if ($('#acctSendSmsBtn')) $('#acctSendSmsBtn').onclick = async () => {
+      if (!phone) { showToast('Set a mobile number first.'); return; }
+      if (!sb) return;
+      const btn = $('#acctSendSmsBtn'); const label = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Sending…';
+      const { data, error } = await sb.functions.invoke('send-sms',
+        { body: { mode: 'self', message: 'Test message from RainGuard ✅ Your number is set up for alerts.' } });
+      btn.disabled = false; btn.textContent = label;
+      if (error) {
+        let msg = error.message;
+        try { const b = await error.context?.json?.(); if (b?.error) msg = b.error; } catch (_) {}
+        showToast('SMS failed: ' + msg); return;
+      }
+      if (data && data.sent > 0) showToast('Test SMS sent to ' + formatPHPhone(phone) + ' ✅');
+      else showToast(data?.note ? ('Not sent: ' + data.note) : 'Could not send — check the function + secrets.');
     };
   }
 

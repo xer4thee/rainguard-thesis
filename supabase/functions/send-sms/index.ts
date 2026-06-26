@@ -1,17 +1,14 @@
-// RainGuard — broadcast an SMS alert to every opted-in registered number via TextBee.
+// RainGuard — send SMS via the TextBee Android gateway.
 //
-// The static dashboard can't send SMS itself (a gateway API key must never ship in client
-// JS), so the admin/device browser calls this Edge Function right after it writes a
-// critical/emergency alert. The function:
-//   1. verifies the caller is an authenticated admin,
-//   2. looks up opted-in recipients server-side with the service-role key,
-//   3. relays the message through the TextBee Android SMS gateway.
+// Two modes (the gateway API key never ships in client JS — it stays a server secret):
+//   • broadcast (default): ADMIN only. Texts every opted-in registered number. Fired by
+//     the admin/device browser right after a critical/emergency alert is written.
+//   • self ({ mode: "self" }): ANY authenticated user. Texts only the CALLER'S OWN
+//     registered number — used by the "Send Test SMS" button on the account page.
 //
 // Deploy:  supabase functions deploy send-sms
 // Secrets: supabase secrets set TEXTBEE_API_KEY=... TEXTBEE_DEVICE_ID=...
 //          (SUPABASE_URL / SUPABASE_ANON_KEY / SUPABASE_SERVICE_ROLE_KEY are auto-injected.)
-//
-// Swapping providers later is a one-spot change: replace the TextBee fetch block below.
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const cors = {
@@ -41,7 +38,7 @@ Deno.serve(async (req) => {
     );
   }
 
-  // ── 1. Verify the caller is an authenticated admin ──
+  // ── Verify the caller is authenticated ──
   const authHeader = req.headers.get("Authorization") || "";
   const token = authHeader.replace(/^Bearer\s+/i, "");
   if (!token) return json({ error: "missing auth token" }, 401);
@@ -53,30 +50,41 @@ Deno.serve(async (req) => {
   if (userErr || !user) return json({ error: "invalid session" }, 401);
 
   const admin = createClient(SUPABASE_URL, SERVICE);
-  const { data: me } = await admin.from("profiles").select("role").eq("id", user.id).single();
-  if (!me || me.role !== "admin") return json({ error: "forbidden — admin only" }, 403);
 
-  // ── 2. Build the message ──
-  let payload: { title?: string; message?: string } = {};
+  // ── Parse body ──
+  let payload: { mode?: string; title?: string; message?: string } = {};
   try { payload = await req.json(); } catch { /* empty body ok */ }
+  const mode = payload.mode === "self" ? "self" : "broadcast";
   const title = String(payload.title || "RainGuard Alert").slice(0, 120);
   const message = String(payload.message || "").slice(0, 400);
-  const text = `RainGuard ALERT\n${title}\n${message}`.trim().slice(0, 480);
 
-  // ── 3. Recipients: opted-in profiles that have a number ──
-  const { data: rows, error: qErr } = await admin
-    .from("profiles")
-    .select("phone")
-    .eq("sms_opt_in", true)
-    .not("phone", "is", null);
-  if (qErr) return json({ error: "recipient lookup failed: " + qErr.message }, 500);
+  // ── Resolve recipients + message per mode ──
+  let recipients: string[];
+  let text: string;
 
-  const recipients = [...new Set((rows || []).map((r) => r.phone).filter(Boolean))];
-  if (recipients.length === 0) {
-    return json({ sent: 0, total: 0, note: "no opted-in numbers" });
+  if (mode === "self") {
+    // Any authenticated user → text only their own registered number.
+    const { data: me } = await admin.from("profiles").select("phone").eq("id", user.id).single();
+    if (!me?.phone) return json({ sent: 0, total: 0, note: "no number on file" });
+    recipients = [me.phone];
+    text = `RainGuard\n${message || "Test message — your number is set up for alerts."}`.slice(0, 480);
+  } else {
+    // Broadcast → admin only, every opted-in number.
+    const { data: me } = await admin.from("profiles").select("role").eq("id", user.id).single();
+    if (!me || me.role !== "admin") return json({ error: "forbidden — admin only" }, 403);
+    const { data: rows, error: qErr } = await admin
+      .from("profiles")
+      .select("phone")
+      .eq("sms_opt_in", true)
+      .not("phone", "is", null);
+    if (qErr) return json({ error: "recipient lookup failed: " + qErr.message }, 500);
+    recipients = [...new Set((rows || []).map((r) => r.phone).filter(Boolean))];
+    text = `RainGuard ALERT\n${title}\n${message}`.trim().slice(0, 480);
   }
 
-  // ── 4. Relay through TextBee (batched; gateway accepts many recipients per call) ──
+  if (recipients.length === 0) return json({ sent: 0, total: 0, note: "no recipients" });
+
+  // ── Relay through TextBee (batched; gateway accepts many recipients per call) ──
   const endpoint =
     `https://api.textbee.dev/api/v1/gateway/devices/${TEXTBEE_DEVICE_ID}/send-sms`;
   const batches: string[][] = [];
